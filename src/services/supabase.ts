@@ -61,6 +61,7 @@ export interface RealtimeCallbacks {
   onDeleteMessage?: (payload: { chatId: string; messageId: string }) => void;
   onEditMessage?: (payload: { chatId: string; messageId: string; text: string }) => void;
   onDeleteChat?: (payload: { chatId: string }) => void;
+  onStickersUpdated?: (packs: any[]) => void;
   onConnectionChange?: (status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR') => void;
 }
 
@@ -128,6 +129,13 @@ export const subscribeToJustChat = (callbacks: RealtimeCallbacks): (() => void) 
   realtimeChannel.on('broadcast', { event: 'delete-chat' }, (payload) => {
     if (payload.payload && callbacks.onDeleteChat) {
       callbacks.onDeleteChat(payload.payload as { chatId: string });
+    }
+  });
+
+  // Listen to sticker packs sync across devices
+  realtimeChannel.on('broadcast', { event: 'stickers-updated' }, (payload) => {
+    if (payload.payload && callbacks.onStickersUpdated) {
+      callbacks.onStickersUpdated(payload.payload as any[]);
     }
   });
 
@@ -221,6 +229,19 @@ export const broadcastDeleteChat = async (chatId: string) => {
     });
   } catch (e) {
     console.warn('Broadcast delete chat failed:', e);
+  }
+};
+
+export const broadcastStickersUpdated = async (packs: any[]) => {
+  if (!realtimeChannel) return;
+  try {
+    await realtimeChannel.send({
+      type: 'broadcast',
+      event: 'stickers-updated',
+      payload: packs
+    });
+  } catch (e) {
+    console.warn('Broadcast stickers updated failed:', e);
   }
 };
 

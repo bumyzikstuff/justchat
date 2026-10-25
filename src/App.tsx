@@ -589,6 +589,15 @@ export function App() {
         if (selectedChatId === chatId) {
           setSelectedChatId(null);
         }
+      },
+      onStickersUpdated: (packs) => {
+        if (Array.isArray(packs) && packs.length > 0) {
+          try {
+            localStorage.setItem('just_sticker_packs', JSON.stringify(packs));
+            window.dispatchEvent(new Event('just_sticker_packs_updated'));
+            AudioHelper.playPop(520, 0.03);
+          } catch (e) {}
+        }
       }
     });
 

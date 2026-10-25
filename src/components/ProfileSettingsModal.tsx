@@ -419,12 +419,12 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           </div>
         </div>
 
-        {/* LINK DEVICE / LOGIN FROM PHONE QR CODE */}
+        {/* LINK DEVICE / LOGIN FROM ANOTHER DEVICE QR CODE */}
         <div className="bg-[#0e1621] border border-[#2AABEE]/40 rounded-2xl p-4 mb-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-1.5 text-[#2AABEE] text-xs font-bold">
               <Smartphone className="w-4 h-4" />
-              <span>Войти с телефона (QR-код и ссылка)</span>
+              <span>Связать устройства (QR-код и ссылка)</span>
             </div>
             <span className="text-[10px] bg-[#2AABEE]/20 text-sky-300 px-2 py-0.5 rounded-full font-bold">
               Вход в 1 клик
@@ -432,7 +432,9 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           </div>
 
           <p className="text-xs text-gray-300 leading-relaxed">
-            Отсканируй этот QR-код камерой телефона или скопируй ссылку — телефон мгновенно войдёт в твой аккаунт с VIP-статусом!
+            {currentUser.isVip
+              ? 'Отсканируй этот QR-код камерой второго устройства или скопируй ссылку — устройство мгновенно войдёт в твой аккаунт с VIP-статусом!'
+              : 'Отсканируй этот QR-код камерой второго устройства или скопируй ссылку — второе устройство (телефон или ПК) мгновенно войдёт в твой аккаунт!'}
           </p>
 
           <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-[#17212b] p-3 rounded-xl border border-[#242f3d]">

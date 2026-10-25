@@ -118,7 +118,7 @@ export function App() {
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('auth_session')) return false;
+      if (params.get('auth_session') || params.get('device_sync')) return false;
     }
     return !localStorage.getItem('just_user') && !localStorage.getItem('bro_user');
   });
@@ -200,6 +200,7 @@ export function App() {
   // Live typing status from other users
   const [typingStatus, setTypingStatus] = useState<Record<string, { userName: string; isTyping: boolean }>>({});
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
 
   // Sync to localStorage safely
   useEffect(() => {
@@ -291,6 +292,10 @@ export function App() {
     const client = getSupabaseClient();
     if (!client || !currentUser || !currentUser.id) return;
 
+    // Guard: Never overwrite customized cloud profile with unedited default phone mock!
+    const isDefaultMock = currentUser.nickname === 'Булат' && (!currentUser.avatar || currentUser.avatar.includes('photo-1534528741775'));
+    if (isDefaultMock) return;
+
     let packs: any[] = [];
     try {
       const raw = localStorage.getItem('just_sticker_packs');
@@ -302,16 +307,13 @@ export function App() {
       nickname: currentUser.nickname,
       username: currentUser.username,
       avatar: currentUser.avatar || null,
-      status_emoji: currentUser.statusEmoji || '🔥',
+      status_emoji: currentUser.statusEmoji || '🎧',
       status_text: currentUser.statusText || '',
       bio: currentUser.bio || '',
+      sticker_packs: packs,
       is_online: true,
       updated_at: new Date().toISOString()
     };
-
-    if (packs.length > 0) {
-      payload.sticker_packs = packs;
-    }
 
     client
       .from('profiles')
@@ -321,7 +323,7 @@ export function App() {
       });
   }, [currentUser]);
 
-  // Load cloud profile (avatar, bio, sticker packs) on startup
+  // Load cloud profile (avatar, nickname, bio, sticker packs) on startup
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client || !currentUser || !currentUser.id) return;
@@ -333,8 +335,23 @@ export function App() {
       .single()
       .then(({ data, error }) => {
         if (!error && data) {
-          // Sync cloud avatar if phone has default Unsplash photo
-          if (data.avatar && (!currentUser.avatar || currentUser.avatar.includes('photo-1534528741775'))) {
+          // If phone has default mock data and cloud has real custom data, pull everything from cloud!
+          const isLocalDefault = (!currentUser.avatar || currentUser.avatar.includes('photo-1534528741775')) && currentUser.nickname === 'Булат';
+          if (isLocalDefault && (data.nickname !== 'Булат' || (data.avatar && !data.avatar.includes('photo-1534528741775')))) {
+            setCurrentUser((prev) => {
+              const next: User = {
+                ...prev,
+                nickname: data.nickname || prev.nickname,
+                avatar: data.avatar || prev.avatar,
+                statusEmoji: data.status_emoji || prev.statusEmoji,
+                statusText: data.status_text || prev.statusText,
+                bio: data.bio || prev.bio
+              };
+              localStorage.setItem('just_user', JSON.stringify(next));
+              return next;
+            });
+          } else if (data.avatar && (!currentUser.avatar || currentUser.avatar.includes('photo-1534528741775'))) {
+            // Also sync avatar if local avatar is default unsplash
             setCurrentUser((prev) => {
               const next = { ...prev, avatar: data.avatar };
               localStorage.setItem('just_user', JSON.stringify(next));
@@ -352,6 +369,55 @@ export function App() {
         }
       });
   }, [currentUser.id]);
+
+  // Live Device Sync from Supabase via QR code / link (?device_sync=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const syncUserId = params.get('device_sync');
+    if (syncUserId) {
+      const client = getSupabaseClient();
+      if (client) {
+        client
+          .from('profiles')
+          .select('*')
+          .eq('id', syncUserId)
+          .single()
+          .then(({ data, error }) => {
+            if (!error && data) {
+              const syncedUser: User = {
+                id: data.id,
+                nickname: data.nickname || 'Бублик',
+                username: data.username || 'bulat',
+                avatar: data.avatar || CURRENT_USER_DEFAULT.avatar,
+                statusEmoji: data.status_emoji || '🎧',
+                statusText: data.status_text || '',
+                bio: data.bio || '',
+                isOnline: true,
+                isVip: true,
+                hideLastSeen: true
+              };
+              setCurrentUser(syncedUser);
+              localStorage.setItem('just_user', JSON.stringify(syncedUser));
+              localStorage.setItem('bro_user', JSON.stringify(syncedUser));
+
+              if (data.sticker_packs && Array.isArray(data.sticker_packs) && data.sticker_packs.length > 0) {
+                try {
+                  localStorage.setItem('just_sticker_packs', JSON.stringify(data.sticker_packs));
+                  window.dispatchEvent(new Event('just_sticker_packs_updated'));
+                } catch (e) {}
+              }
+
+              setIsAuthOpen(false);
+              window.history.replaceState({}, document.title, window.location.pathname);
+              AudioHelper.playSentSound();
+              setSyncToast(`Профиль «${syncedUser.nickname}» и стикеры успешно синхронизированы с ПК! ✨`);
+              setTimeout(() => setSyncToast(null), 5000);
+            }
+          });
+      }
+    }
+  }, []);
 
   // Supabase Realtime broadcast listener
   useEffect(() => {
@@ -1175,7 +1241,9 @@ export function App() {
       return [...prev, friend];
     });
 
-    const existing = chats.find(c => c.name === friend.nickname && c.type === 'direct');
+    // Use deterministic direct chat ID so both users always meet in the exact same room
+    const directChatId = `chat-${[currentUser.id, friend.id].sort().join('-')}`;
+    const existing = chats.find(c => c.id === directChatId || c.id === `chat-${friend.id}` || (c.name === friend.nickname && c.type === 'direct'));
     if (existing) {
       setSelectedChatId(existing.id);
       markChatAsRead(existing.id);
@@ -1183,7 +1251,7 @@ export function App() {
     }
 
     const newChat: Chat = {
-      id: `chat-${friend.id}`,
+      id: directChatId,
       type: 'direct',
       name: friend.nickname,
       avatar: friend.avatar,
@@ -1360,7 +1428,16 @@ export function App() {
   const selectedChat = chats.find((c) => c.id === selectedChatId) || null;
 
   return (
-    <div className="flex h-[100dvh] w-full overflow-hidden bg-[#0e1621] text-gray-100">
+    <div className="flex h-[100dvh] w-full overflow-hidden bg-[#0e1621] text-gray-100 relative">
+      {/* Floating Device Sync Notification Banner */}
+      {syncToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-emerald-600 text-white font-medium text-xs sm:text-sm px-4 py-2.5 rounded-2xl shadow-2xl flex items-center space-x-2 border border-emerald-400 animate-bounce">
+          <span>✨</span>
+          <span>{syncToast}</span>
+          <button onClick={() => setSyncToast(null)} className="ml-2 text-white/80 hover:text-white font-bold">✕</button>
+        </div>
+      )}
+
       {/* Auth Modal with Invite Code */}
       {isAuthOpen && (
         <AuthModal

@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User } from '../types';
 import { AVAILABLE_EMOJIS } from '../data/mockData';
-import { X, Sparkles, Check, Copy, Shield, LogOut, KeyRound, Link as LinkIcon, Camera, Upload, Bell, Volume2, VolumeX, Smartphone, CheckCircle2, Cloud, Database, EyeOff, QrCode } from 'lucide-react';
+import { X, Sparkles, Check, Copy, Shield, LogOut, KeyRound, Link as LinkIcon, Camera, Upload, Bell, Volume2, VolumeX, Smartphone, CheckCircle2, Cloud, Database, EyeOff, QrCode, RefreshCw } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import QRCode from 'qrcode';
 import { AudioHelper } from '../utils/audio';
-import { getSupabaseConfig, resetSupabaseClient } from '../services/supabase';
+import { getSupabaseConfig, getSupabaseClient, resetSupabaseClient } from '../services/supabase';
 
 const PRESET_AVATARS = [
   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -50,38 +50,68 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const [copiedDeviceLink, setCopiedDeviceLink] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [qrError, setQrError] = useState(false);
+  const [isCloudSynced, setIsCloudSynced] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+
+  // Sync profile & custom sticker packs to Supabase cloud
+  const syncProfileToCloud = async () => {
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    setIsSyncingCloud(true);
+    let packs: any[] = [];
+    try {
+      const raw = localStorage.getItem('just_sticker_packs');
+      if (raw) packs = JSON.parse(raw);
+    } catch (e) {}
+
+    const payload: any = {
+      id: currentUser.id || 'user-me',
+      nickname: nickname || currentUser.nickname,
+      username: username || currentUser.username || 'bulat',
+      avatar: avatar || currentUser.avatar,
+      status_emoji: statusEmoji || currentUser.statusEmoji || '🎧',
+      status_text: statusText || currentUser.statusText || '',
+      bio: bio || currentUser.bio || '',
+      sticker_packs: packs,
+      is_online: true,
+      updated_at: new Date().toISOString()
+    };
+
+    try {
+      const { error } = await client.from('profiles').upsert(payload);
+      if (!error) {
+        setIsCloudSynced(true);
+        setTimeout(() => setIsCloudSynced(false), 3000);
+      } else {
+        console.warn('Sync profile error:', error.message);
+      }
+    } catch (e) {
+      console.warn('Sync profile exception:', e);
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
 
   const getDeviceLoginUrl = () => {
-    try {
-      // Create minimal payload (under 150 bytes) so it fits comfortably in a standard QR code
-      const minimalUser: Partial<User> = {
-        id: currentUser.id,
-        nickname: currentUser.nickname,
-        username: currentUser.username,
-        statusEmoji: currentUser.statusEmoji,
-        statusText: currentUser.statusText || '',
-        isVip: currentUser.isVip || false,
-        hideLastSeen: currentUser.hideLastSeen ?? true
-      };
-      // Only include avatar if it's a short external URL, never a giant Base64 Data URL!
-      if (currentUser.avatar && currentUser.avatar.startsWith('http')) {
-        minimalUser.avatar = currentUser.avatar;
-      }
-      const payload = btoa(unescape(encodeURIComponent(JSON.stringify(minimalUser))));
-      return `${window.location.origin}/?auth_session=${payload}`;
-    } catch (e) {
-      return window.location.origin;
-    }
+    const origin = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+      ? window.location.origin
+      : 'https://justchat-nu.vercel.app';
+    const userId = currentUser.id || 'user-me';
+    return `${origin}/?device_sync=${encodeURIComponent(userId)}`;
   };
 
   useEffect(() => {
     if (isOpen) {
       setQrError(false);
+      // Auto-upload latest profile data to cloud so phone fetches fresh info
+      syncProfileToCloud();
+
       const url = getDeviceLoginUrl();
       QRCode.toDataURL(url, {
-        width: 240,
+        width: 260,
         margin: 1,
-        errorCorrectionLevel: 'L',
+        errorCorrectionLevel: 'M',
         color: {
           dark: '#0e1621',
           light: '#ffffff'
@@ -96,9 +126,10 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           setQrError(true);
         });
     }
-  }, [isOpen, currentUser]);
+  }, [isOpen, currentUser, nickname, avatar, statusEmoji, statusText, bio]);
 
   const handleCopyDeviceLink = () => {
+    syncProfileToCloud();
     navigator.clipboard.writeText(getDeviceLoginUrl());
     setCopiedDeviceLink(true);
     AudioHelper.playSentSound();
@@ -465,7 +496,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-1.5 text-[#2AABEE] text-xs font-bold">
               <Smartphone className="w-4 h-4" />
-              <span>Связать устройства (QR-код и ссылка)</span>
+              <span>Синхронизация с телефоном (QR-код и ссылка)</span>
             </div>
             <span className="text-[10px] bg-[#2AABEE]/20 text-sky-300 px-2 py-0.5 rounded-full font-bold">
               Вход в 1 клик
@@ -473,32 +504,60 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           </div>
 
           <p className="text-xs text-gray-300 leading-relaxed">
-            {currentUser.isVip
-              ? 'Отсканируй этот QR-код камерой второго устройства или скопируй ссылку — устройство мгновенно войдёт в твой аккаунт с VIP-статусом!'
-              : 'Отсканируй этот QR-код камерой второго устройства или скопируй ссылку — второе устройство (телефон или ПК) мгновенно войдёт в твой аккаунт!'}
+            Отсканируй этот QR-код камерой телефона или отправь ссылку себе — телефон мгновенно загрузит твой профиль (аватарку, никнейм, статус и стикеры)!
           </p>
+
+          {/* Cloud Sync Status Pill */}
+          <div className="flex items-center justify-between bg-[#17212b] p-2.5 rounded-xl border border-[#242f3d]">
+            <div className="flex items-center space-x-2">
+              <Cloud className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <span className="text-xs text-gray-200 truncate">
+                Облако: <b className="text-white">{nickname || currentUser.nickname}</b> (стикеры готовы)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={syncProfileToCloud}
+              disabled={isSyncingCloud}
+              className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-[11px] font-semibold flex items-center space-x-1 transition active:scale-95 flex-shrink-0"
+            >
+              {isSyncingCloud ? (
+                <span>Выгрузка...</span>
+              ) : isCloudSynced ? (
+                <>
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Обновлено!</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Выгрузить в облако</span>
+                </>
+              )}
+            </button>
+          </div>
 
           <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-[#17212b] p-3 rounded-xl border border-[#242f3d]">
             {qrDataUrl ? (
               <img 
                 src={qrDataUrl} 
                 alt="QR Code" 
-                className="w-28 h-28 rounded-xl bg-white p-1.5 shadow object-contain"
+                className="w-28 h-28 rounded-xl bg-white p-1.5 shadow object-contain flex-shrink-0"
               />
             ) : qrError ? (
-              <div className="w-28 h-28 rounded-xl bg-[#17212b] border border-amber-500/40 p-2 flex flex-col items-center justify-center text-center text-[10px] text-amber-300">
+              <div className="w-28 h-28 rounded-xl bg-[#17212b] border border-amber-500/40 p-2 flex flex-col items-center justify-center text-center text-[10px] text-amber-300 flex-shrink-0">
                 <QrCode className="w-6 h-6 mb-1 text-amber-400" />
-                <span>Используй кнопку справа 👉</span>
+                <span>Используй кнопку 👉</span>
               </div>
             ) : (
-              <div className="w-28 h-28 rounded-xl bg-[#0e1621] border border-[#242f3d] flex items-center justify-center text-xs text-gray-400">
+              <div className="w-28 h-28 rounded-xl bg-[#0e1621] border border-[#242f3d] flex items-center justify-center text-xs text-gray-400 flex-shrink-0">
                 <span className="animate-pulse">QR-код...</span>
               </div>
             )}
             <div className="flex-1 space-y-2 text-center sm:text-left w-full">
-              <p className="text-[11px] text-gray-400">
+              <p className="text-[11px] text-gray-400 leading-snug">
                 1. Наведи камеру телефона на этот QR-код<br/>
-                2. Либо нажми кнопку ниже и отправь ссылку себе
+                2. Либо скопируй прямую ссылку и открой на телефоне
               </p>
               <button
                 type="button"
@@ -506,9 +565,14 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                 className="w-full py-2 px-3 rounded-xl bg-[#2AABEE] hover:bg-sky-400 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 transition active:scale-95 shadow"
               >
                 {copiedDeviceLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                <span>{copiedDeviceLink ? 'Ссылка скопирована!' : 'Скопировать ссылку для входа'}</span>
+                <span>{copiedDeviceLink ? 'Прямая ссылка скопирована!' : 'Скопировать ссылку для телефона'}</span>
               </button>
             </div>
+          </div>
+
+          <div className="p-2.5 rounded-xl bg-[#17212b]/60 border border-[#242f3d] text-[11px] text-gray-400 leading-relaxed">
+            💬 <b className="text-gray-300">Хочешь общаться между ПК и телефоном?</b><br />
+            На телефоне в настройках нажми <span className="text-rose-400 font-semibold">«Выйти»</span> и при входе укажи имя собеседника (например, <i>Друг</i>). Тогда ПК и телефон будут двумя разными людьми и смогут переписываться!
           </div>
         </div>
 

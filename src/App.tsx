@@ -1146,6 +1146,8 @@ export function App() {
     senderEmoji?: string;
     senderAvatar?: string;
     createdAt: string;
+    messageId?: string;
+    canDelete?: boolean;
   } | null>(null);
 
   // Mark chat messages as read whenever a chat is opened or selected
@@ -2433,6 +2435,12 @@ export function App() {
         senderEmoji={activeVideoNote?.senderEmoji}
         senderAvatar={activeVideoNote?.senderAvatar}
         createdAt={activeVideoNote?.createdAt || ''}
+        messageId={activeVideoNote?.messageId}
+        canDelete={activeVideoNote?.canDelete}
+        onDeleteMessage={(id) => {
+          handleDeleteMessage(id);
+          setActiveVideoNote(null);
+        }}
         onClose={() => setActiveVideoNote(null)}
       />
 

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Check, Camera, RefreshCw, Loader2 } from 'lucide-react';
 import { AudioHelper } from '../utils/audio';
-import { uploadMediaToSupabase, blobToDataUrl } from '../services/supabase';
 
 interface VideoNoteRecorderModalProps {
   isOpen: boolean;
@@ -12,13 +11,16 @@ interface VideoNoteRecorderModalProps {
 const getSupportedVideoMime = (): string => {
   if (typeof MediaRecorder === 'undefined') return '';
   const candidates = [
-    'video/webm;codecs=vp8,opus',
-    'video/webm',
     'video/mp4;codecs=avc1,mp4a',
-    'video/mp4'
+    'video/mp4',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9,opus',
+    'video/webm'
   ];
   for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c)) return c;
+    try {
+      if (MediaRecorder.isTypeSupported(c)) return c;
+    } catch (e) {}
   }
   return '';
 };
@@ -48,6 +50,38 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
     }
   };
 
+  const stopAndClearRecorder = () => {
+    const rec = mediaRecorderRef.current;
+    if (rec) {
+      mediaRecorderRef.current = null;
+      try {
+        rec.ondataavailable = null;
+        rec.onstop = null;
+        rec.onerror = null;
+        if (rec.state !== 'inactive') {
+          rec.stop();
+        }
+      } catch (e) {}
+    }
+  };
+
+  const cleanupStream = () => {
+    stopAndClearRecorder();
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch (e) {}
+      mediaStreamRef.current = null;
+    }
+  };
+
+  const handleToggleCamera = () => {
+    cleanupStream();
+    chunksRef.current = [];
+    setSeconds(0);
+    setFacingMode((prev) => (prev === 'user' ? 'environment' : 'user'));
+  };
+
   const handleFinish = () => {
     if (hasFinishedRef.current) return;
     hasFinishedRef.current = true;
@@ -59,8 +93,9 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
     if (recorder && recorder.state !== 'inactive') {
       recorder.onstop = () => {
         try {
-          const mime = recorder.mimeType || 'video/webm';
-          const blob = new Blob(chunksRef.current, { type: mime });
+          const mime = recorder.mimeType || getSupportedVideoMime() || 'video/webm';
+          const recordedChunks = [...chunksRef.current];
+          const blob = new Blob(recordedChunks, { type: mime });
           if (blob.size > 0) {
             const localUrl = URL.createObjectURL(blob);
             onSendVideoNote(blob, localUrl, seconds || 1);
@@ -73,10 +108,8 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
         cleanupStream();
         onClose();
       };
+
       try {
-        if (recorder.state === 'recording') {
-          recorder.requestData();
-        }
         recorder.stop();
       } catch (e) {
         cleanupStream();
@@ -88,26 +121,12 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
     }
   };
 
-  const cleanupStream = () => {
-    if (mediaStreamRef.current) {
-      try {
-        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      } catch (e) {}
-      mediaStreamRef.current = null;
-    }
-  };
-
   const handleCancel = () => {
     hasFinishedRef.current = true;
     setIsRecording(false);
     clearTimer();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try {
-        mediaRecorderRef.current.onstop = null;
-        mediaRecorderRef.current.stop();
-      } catch (e) {}
-    }
     cleanupStream();
+    chunksRef.current = [];
     onClose();
   };
 
@@ -179,12 +198,12 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
           mediaRecorderRef.current = recorder;
 
           recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) {
+            if (e.data && e.data.size > 0 && isMounted && !hasFinishedRef.current) {
               chunksRef.current.push(e.data);
             }
           };
 
-          recorder.start(150);
+          recorder.start(1000);
           if (isMounted) {
             setIsRecording(true);
             AudioHelper.playRecordStart();
@@ -305,7 +324,7 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
           </button>
 
           <button
-            onClick={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+            onClick={handleToggleCamera}
             className="p-3 rounded-full bg-[#17212b] border border-[#242f3d] text-gray-300 hover:text-white transition active:scale-95"
             title="Переключить камеру"
           >

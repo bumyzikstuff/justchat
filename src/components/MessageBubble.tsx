@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Message, TrackInfo } from '../types';
-import { Check, CheckCheck, Play, Pause, Volume2, VolumeX, Music, Download, Smile, Edit2, Trash2 } from 'lucide-react';
+import { Check, CheckCheck, Play, Pause, Volume2, VolumeX, Music, Download, Smile, Edit2, Trash2, Video } from 'lucide-react';
 import { AudioHelper } from '../utils/audio';
 
 const QUICK_REACTIONS = ['❤️', '🔥', '😂', '👍', '👎', '😮'];
@@ -16,6 +16,8 @@ interface MessageBubbleProps {
     senderEmoji?: string;
     senderAvatar?: string;
     createdAt: string;
+    messageId?: string;
+    canDelete?: boolean;
   }) => void;
   onToggleReaction?: (messageId: string, emoji: string) => void;
   onEditMessage?: (message: Message) => void;
@@ -45,6 +47,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const rawVideoUrl = message.mediaUrl || '';
   const videoSrc = (hasVideoError || !rawVideoUrl) ? '' : rawVideoUrl;
 
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isVideoMuted;
+    }
+  }, [isVideoMuted]);
+
   // Audio voice state
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const [hasVoiceError, setHasVoiceError] = useState(false);
@@ -59,11 +67,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const handleVideoClick = () => {
     if (onOpenVideoViewer) {
       onOpenVideoViewer({
-        url: videoSrc,
+        url: rawVideoUrl || videoSrc,
         senderName: message.senderName,
         senderEmoji: message.senderEmoji,
         senderAvatar: message.senderAvatar,
-        createdAt: message.createdAt
+        createdAt: message.createdAt,
+        messageId: message.id,
+        canDelete: Boolean(onDeleteMessage)
       });
       return;
     }
@@ -314,33 +324,99 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             {message.senderEmoji && <span>{message.senderEmoji}</span>}
           </div>
         )}
-        <div 
-          onClick={handleVideoClick}
-          className="relative w-56 h-56 rounded-full overflow-hidden border-2 border-[#2AABEE]/80 shadow-2xl cursor-pointer group bg-zinc-950"
-        >
-          <video
-            ref={videoRef}
-            src={videoSrc}
-            playsInline
-            autoPlay
-            loop
-            muted={isVideoMuted}
-            onError={() => setHasVideoError(true)}
-            className="w-full h-full object-cover"
-          />
 
-          {/* Sound / Expand Indicator */}
-          <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md text-white p-1.5 rounded-full opacity-80 group-hover:opacity-100 transition shadow">
-            {isVideoMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-[#2AABEE]" />}
+        <div className="relative flex items-center">
+          {/* Circular Video Bubble */}
+          <div 
+            onClick={handleVideoClick}
+            className="relative w-52 h-52 sm:w-56 sm:h-56 rounded-full overflow-hidden border-2 border-[#2AABEE]/80 shadow-2xl cursor-pointer group bg-zinc-950"
+          >
+            {hasVideoError ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900 text-gray-400 p-4 text-center select-none">
+                <Video className="w-10 h-10 mb-2 text-[#2AABEE]/70" />
+                <span className="text-xs text-gray-200 font-medium">Видеосообщение</span>
+                <span className="text-[10px] text-gray-400 mt-1">Нажмите для просмотра</span>
+              </div>
+            ) : (
+              <video
+                ref={videoRef}
+                src={videoSrc}
+                playsInline
+                autoPlay
+                loop
+                muted={isVideoMuted}
+                onError={() => setHasVideoError(true)}
+                className="w-full h-full object-cover"
+              />
+            )}
+
+            {/* Sound / Expand Indicator */}
+            <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md text-white p-1.5 rounded-full opacity-80 group-hover:opacity-100 transition shadow pointer-events-none">
+              {isVideoMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-[#2AABEE]" />}
+            </div>
+
+            {/* Timestamp and status */}
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white text-[11px] px-2.5 py-0.5 rounded-full flex items-center space-x-1.5 shadow pointer-events-none">
+              <span>{message.createdAt}</span>
+              {isOut && <CheckCheck className="w-3.5 h-3.5 text-[#2AABEE]" />}
+            </div>
           </div>
 
-          {/* Timestamp and duration */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white text-[11px] px-2.5 py-0.5 rounded-full flex items-center space-x-1.5 shadow">
-            <span>{message.createdAt}</span>
-            {isOut && <CheckCheck className="w-3.5 h-3.5 text-[#2AABEE]" />}
+          {/* Action buttons (Delete & Reactions) positioned OUTSIDE the circular bubble */}
+          {/* Visible on mobile (opacity-90) & on desktop hover */}
+          <div className={`flex flex-col space-y-2 ${isOut ? 'mr-2.5 order-first' : 'ml-2.5'} opacity-90 md:opacity-0 md:group-hover:opacity-100 transition`}>
+            {/* Direct delete button for video note */}
+            {onDeleteMessage && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm('Удалить это видеосообщение?')) {
+                    onDeleteMessage(message.id);
+                  }
+                }}
+                className="p-2 rounded-full bg-[#17212b]/95 border border-[#242f3d] text-gray-400 hover:text-rose-400 transition shadow active:scale-95"
+                title="Удалить кружочек"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* Emoji reaction picker button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPicker(!showPicker);
+              }}
+              className="p-2 rounded-full bg-[#17212b]/95 border border-[#242f3d] text-gray-400 hover:text-white transition shadow active:scale-95"
+              title="Добавить реакцию"
+            >
+              <Smile className="w-4 h-4" />
+            </button>
           </div>
-          {renderReactionBar()}
+
+          {/* Emoji Picker Popover for video note */}
+          {showPicker && (
+            <div
+              className={`absolute z-30 ${isOut ? 'right-12' : 'left-12'} -top-10 bg-[#17212b]/95 border border-[#242f3d] backdrop-blur-md rounded-full px-2 py-1 shadow-2xl flex items-center space-x-1.5 animate-in fade-in zoom-in-95 duration-100`}
+            >
+              {QUICK_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleReaction?.(message.id, emoji);
+                    setShowPicker(false);
+                    AudioHelper.playPop(540, 0.05);
+                  }}
+                  className="w-7 h-7 flex items-center justify-center text-sm hover:scale-125 active:scale-95 transition-transform"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
         {renderReactionsList()}
       </div>
     );

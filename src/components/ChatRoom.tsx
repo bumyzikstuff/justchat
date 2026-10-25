@@ -25,6 +25,8 @@ interface ChatRoomProps {
     senderEmoji?: string;
     senderAvatar?: string;
     createdAt: string;
+    messageId?: string;
+    canDelete?: boolean;
   }) => void;
   onOpenChatProfile?: () => void;
   onClearHistory?: (chatId: string) => void;

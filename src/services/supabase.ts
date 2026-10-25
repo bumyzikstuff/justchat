@@ -67,10 +67,11 @@ export interface RealtimeCallbacks {
   onDeleteStory?: (payload: { storyId: string }) => void;
   onStoryLike?: (payload: { storyId: string; likes: any[] }) => void;
   onConnectionChange?: (status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR') => void;
+  onPresenceSync?: (onlineUserIds: string[]) => void;
 }
 
-// Subscribe to JustChat live broadcast channel
-export const subscribeToJustChat = (callbacks: RealtimeCallbacks): (() => void) => {
+// Subscribe to JustChat live broadcast & presence channel
+export const subscribeToJustChat = (callbacks: RealtimeCallbacks, currentUserId?: string): (() => void) => {
   const client = getSupabaseClient();
   if (!client) return () => {};
 
@@ -80,7 +81,20 @@ export const subscribeToJustChat = (callbacks: RealtimeCallbacks): (() => void) 
 
   realtimeChannel = client.channel('justchat-live-room', {
     config: {
-      broadcast: { ack: true }
+      broadcast: { ack: true },
+      presence: {
+        key: currentUserId || 'anon'
+      }
+    }
+  });
+
+  // Track live Presence (who is online right now)
+  realtimeChannel.on('presence', { event: 'sync' }, () => {
+    if (!realtimeChannel) return;
+    const state = realtimeChannel.presenceState();
+    const onlineKeys = Object.keys(state).filter((k) => k && k !== 'anon');
+    if (callbacks.onPresenceSync) {
+      callbacks.onPresenceSync(onlineKeys);
     }
   });
 
@@ -171,7 +185,17 @@ export const subscribeToJustChat = (callbacks: RealtimeCallbacks): (() => void) 
     }
   });
 
-  realtimeChannel.subscribe((status) => {
+  realtimeChannel.subscribe(async (status) => {
+    if (status === 'SUBSCRIBED' && currentUserId && realtimeChannel) {
+      try {
+        await realtimeChannel.track({
+          userId: currentUserId,
+          onlineAt: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn('Realtime presence track warning:', e);
+      }
+    }
     if (callbacks.onConnectionChange) {
       callbacks.onConnectionChange(status as 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR');
     }
@@ -179,6 +203,9 @@ export const subscribeToJustChat = (callbacks: RealtimeCallbacks): (() => void) 
 
   return () => {
     if (realtimeChannel) {
+      try {
+        realtimeChannel.untrack();
+      } catch (e) {}
       realtimeChannel.unsubscribe();
       realtimeChannel = null;
     }
@@ -568,4 +595,35 @@ export const blobToDataUrl = (blob: Blob): Promise<string> => {
     reader.onerror = () => resolve('');
     reader.readAsDataURL(blob);
   });
+};
+
+// Update user's online status and last active timestamp in Supabase profiles
+export const updateOnlineStatusInCloud = async (userId: string, isOnline: boolean) => {
+  const client = getSupabaseClient();
+  if (!client || !userId) return;
+  try {
+    await client
+      .from('profiles')
+      .update({
+        is_online: isOnline,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+  } catch (e) {
+    console.warn('Error updating online status:', e);
+  }
+};
+
+// Fetch all registered cloud profiles to sync up-to-date presence and last seen
+export const fetchCloudProfiles = async (): Promise<any[]> => {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  try {
+    const { data, error } = await client.from('profiles').select('*');
+    if (error || !data) return [];
+    return data;
+  } catch (e) {
+    console.warn('Error fetching cloud profiles:', e);
+    return [];
+  }
 };

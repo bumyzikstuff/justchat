@@ -35,9 +35,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const displayUsername = isSavedChat ? 'Личное облако' : (user?.username ? `@${user.username}` : (chat?.type === 'group' ? 'групповой чат' : ''));
   const displayAvatar = user?.avatar || chat?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80';
   const displayEmoji = isSavedChat ? '⭐' : (user?.statusEmoji || chat?.statusEmoji || '🔥');
-  const displayStatus = isSavedChat ? 'Облачное хранилище' : (user?.statusText || (chat?.type === 'group' ? 'Групповой чат' : 'в сети'));
+  const isOnline = user ? Boolean(user.isOnline) : Boolean(chat?.isOnline);
+  const lastSeenText = user?.lastSeen || chat?.lastSeen || 'был(а) недавно';
+  const displayStatus = isSavedChat ? 'Облачное хранилище' : (user?.statusText || (chat?.type === 'group' ? 'Групповой чат' : (isOnline ? 'в сети' : lastSeenText)));
   const displayBio = isSavedChat ? 'Ваше личное зашифрованное хранилище заметок, файлов, музыки и кружочков 🔖. Доступно только вам.' : (user?.bio || (chat?.type === 'group' ? 'Общий чат для общения и обмена треками' : 'Пользователь JustChat'));
-  const isOnline = user ? user.isOnline : true;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -115,13 +116,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 ? 'Всегда доступно'
                 : isBotUser
                 ? 'официальный сервис JustChat'
-                : isOwnProfile || user?.hideLastSeen || user?.isVip
-                ? 'был(а) недавно'
+                : isOwnProfile || user?.hideLastSeen
+                ? (isOnline ? 'в сети' : 'был(а) недавно')
                 : isOnline
                 ? 'в сети'
-                : user?.lastSeen
-                ? user.lastSeen.startsWith('был') ? user.lastSeen : `был(а) в сети ${user.lastSeen}`
-                : 'был(а) недавно'}
+                : lastSeenText}
             </p>
           </div>
 

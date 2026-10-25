@@ -4,6 +4,7 @@ import { X, Search, Users, UserPlus, AtSign, Check, Plus, MessageCircle, Bot, Tr
 import confetti from 'canvas-confetti';
 import { STICKER_BOT_USER } from '../services/stickerBot';
 import { getSupabaseClient } from '../services/supabase';
+import { formatLastSeen } from '../utils/presence';
 
 interface CreateChatModalProps {
   isOpen: boolean;
@@ -63,17 +64,23 @@ export const CreateChatModal: React.FC<CreateChatModalProps> = ({
           .limit(10);
 
         if (!error && data && active) {
-          const mapped: User[] = data.map((p) => ({
-            id: p.id,
-            nickname: p.nickname || 'Пользователь',
-            username: p.username || '',
-            avatar: p.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-            statusEmoji: p.status_emoji || '🔥',
-            statusText: p.status_text || 'на связи 🤙',
-            bio: p.bio,
-            isOnline: p.is_online ?? true,
-            isVip: p.id === 'user-me' || p.username === 'bulat'
-          }));
+          const mapped: User[] = data.map((p) => {
+            const isFresh = p.updated_at && (Date.now() - new Date(p.updated_at).getTime()) < 60000;
+            const isOnline = Boolean(p.is_online && isFresh);
+            return {
+              id: p.id,
+              nickname: p.nickname || 'Пользователь',
+              username: p.username || '',
+              avatar: p.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+              statusEmoji: p.status_emoji || '🔥',
+              statusText: p.status_text || 'на связи 🤙',
+              bio: p.bio,
+              isOnline,
+              lastSeen: isOnline ? 'в сети' : formatLastSeen(p.updated_at),
+              updatedAt: p.updated_at,
+              isVip: p.id === 'user-me' || p.username === 'bulat'
+            };
+          });
           setRemoteUsers(mapped.filter((u) => u.id !== currentUserId));
         }
       } catch (e) {

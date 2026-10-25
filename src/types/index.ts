@@ -8,6 +8,7 @@ export interface User {
   bio?: string;
   isOnline: boolean;
   lastSeen?: string;
+  updatedAt?: string;
   isVip?: boolean;
   hideLastSeen?: boolean;
   isBot?: boolean;
@@ -90,6 +91,7 @@ export interface Chat {
   members?: User[];
   isOnline?: boolean;
   lastSeen?: string;
+  partnerId?: string;
   isSavedMessages?: boolean;
   isBot?: boolean;
 }

@@ -3,6 +3,7 @@ import { Chat, Message, User } from '../types';
 import { Pin, Search, Check, CheckCheck, Mic, Video, Music, Smile, Plus, Edit, Trash2, Bookmark, RefreshCw, X, Loader2, MessageCircle } from 'lucide-react';
 import { AudioHelper } from '../utils/audio';
 import { getSupabaseClient } from '../services/supabase';
+import { formatLastSeen } from '../utils/presence';
 
 interface ChatListProps {
   chats: Chat[];
@@ -146,17 +147,23 @@ export const ChatList: React.FC<ChatListProps> = ({
           .limit(8);
 
         if (!error && data && active) {
-          const mapped: User[] = data.map((p) => ({
-            id: p.id,
-            nickname: p.nickname || 'Пользователь',
-            username: p.username || '',
-            avatar: p.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-            statusEmoji: p.status_emoji || '🔥',
-            statusText: p.status_text || 'в сети',
-            bio: p.bio,
-            isOnline: p.is_online ?? true,
-            isVip: p.id === 'user-me' || p.username === 'bulat'
-          }));
+          const mapped: User[] = data.map((p) => {
+            const isFresh = p.updated_at && (Date.now() - new Date(p.updated_at).getTime()) < 60000;
+            const isOnline = Boolean(p.is_online && isFresh);
+            return {
+              id: p.id,
+              nickname: p.nickname || 'Пользователь',
+              username: p.username || '',
+              avatar: p.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+              statusEmoji: p.status_emoji || '🔥',
+              statusText: p.status_text || (isOnline ? 'в сети' : formatLastSeen(p.updated_at)),
+              bio: p.bio,
+              isOnline,
+              lastSeen: isOnline ? 'в сети' : formatLastSeen(p.updated_at),
+              updatedAt: p.updated_at,
+              isVip: p.id === 'user-me' || p.username === 'bulat'
+            };
+          });
           setGlobalUsers(mapped.filter((u) => u.id !== currentUserId));
         }
       } catch (e) {
@@ -387,8 +394,11 @@ export const ChatList: React.FC<ChatListProps> = ({
                     <div className="flex-1 min-w-0 pr-2">
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center space-x-1.5 truncate">
-                          <h3 className="font-semibold text-sm text-gray-100 group-hover:text-[#2AABEE] transition truncate">
-                            {chat.name}
+                          <h3 className="font-semibold text-sm text-gray-100 group-hover:text-[#2AABEE] transition truncate flex items-center space-x-1.5">
+                            <span className="truncate">{chat.name}</span>
+                            {chat.type === 'direct' && chat.isOnline === true && (
+                              <span className="w-2 h-2 bg-emerald-400 rounded-full inline-block flex-shrink-0 animate-pulse" title="В сети" />
+                            )}
                           </h3>
                           {chat.isBot && (
                             <span className="text-[9px] bg-sky-500/20 text-sky-400 border border-sky-400/40 px-1.5 py-0.2 rounded-full font-bold font-mono">

@@ -27,6 +27,7 @@ import { CreateChatModal } from './components/CreateChatModal';
 import { AudioHelper } from './utils/audio';
 import { encryptText, decryptText } from './utils/crypto';
 import { compressStoryMedia, compressAvatar, filterActiveStories, getStoryTimestamp, formatStoryTime } from './utils/storyHelper';
+import { formatLastSeen, isUserOnline } from './utils/presence';
 import { STICKER_BOT_USER, STICKER_BOT_CHAT, processStickerBotInput, getBotSession } from './services/stickerBot';
 import {
   getSupabaseConfig,
@@ -50,7 +51,9 @@ import {
   saveStoryToCloud,
   fetchStoriesFromCloud,
   deleteStoryFromCloud,
-  updateStoryLikesInCloud
+  updateStoryLikesInCloud,
+  updateOnlineStatusInCloud,
+  fetchCloudProfiles
 } from './services/supabase';
 
 export function App() {
@@ -170,8 +173,9 @@ export function App() {
           statusEmoji: '🎧',
           isPinned: true,
           unreadCount: 0,
-          isOnline: true,
-          lastSeen: 'в сети',
+          partnerId: 'user-me',
+          isOnline: false,
+          lastSeen: 'был(а) недавно',
           lastMessage: {
             text: 'Привет! Добро пожаловать в JustChat 🤙',
             createdAt: 'Только что',
@@ -245,6 +249,124 @@ export function App() {
   const [typingStatus, setTypingStatus] = useState<Record<string, { userName: string; isTyping: boolean }>>({});
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [syncToast, setSyncToast] = useState<string | null>(null);
+
+  // Live Presence & Cloud Profiles state
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
+  const [cloudProfiles, setCloudProfiles] = useState<any[]>([]);
+
+  // Helper to extract the other participant's user ID in a direct chat
+  const getChatPartnerId = (chat: Chat, myId: string): string | null => {
+    if (chat.type !== 'direct' || chat.isSavedMessages || chat.id === 'chat-saved' || chat.isBot) {
+      return null;
+    }
+    if (chat.partnerId) return chat.partnerId;
+    if (chat.id.startsWith('chat-')) {
+      const parts = chat.id.replace('chat-', '').split('-');
+      if (parts.length === 2) {
+        return parts[0] === myId ? parts[1] : parts[0];
+      }
+    }
+    const matchedFriend = friends.find((f) => f.nickname === chat.name || f.username === chat.name);
+    if (matchedFriend) return matchedFriend.id;
+    return null;
+  };
+
+  // Heartbeat & Online Presence lifecycle
+  useEffect(() => {
+    if (!currentUser.id) return;
+
+    fetchCloudProfiles().then((profs) => {
+      if (profs && profs.length > 0) {
+        setCloudProfiles(profs);
+      }
+    });
+
+    // Mark online initially
+    updateOnlineStatusInCloud(currentUser.id, true);
+
+    // Heartbeat every 30 seconds
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        updateOnlineStatusInCloud(currentUser.id, true);
+      }
+    }, 30000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        updateOnlineStatusInCloud(currentUser.id, false);
+      } else {
+        updateOnlineStatusInCloud(currentUser.id, true);
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      updateOnlineStatusInCloud(currentUser.id, false);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      updateOnlineStatusInCloud(currentUser.id, false);
+    };
+  }, [currentUser.id]);
+
+  // Keep chats and friends in sync with Realtime presence and cloud profiles
+  useEffect(() => {
+    setChats((prev) =>
+      prev.map((c) => {
+        const partnerId = getChatPartnerId(c, currentUser.id);
+        if (!partnerId) return c;
+
+        const prof = cloudProfiles.find((p) => p.id === partnerId);
+        const isOnline = isUserOnline(
+          partnerId,
+          onlineUserIds,
+          prof?.updated_at,
+          prof?.is_online
+        );
+        const lastSeen = isOnline ? 'в сети' : formatLastSeen(prof?.updated_at);
+
+        if (c.isOnline === isOnline && c.lastSeen === lastSeen && c.partnerId === partnerId) {
+          return c;
+        }
+
+        return {
+          ...c,
+          partnerId,
+          isOnline,
+          lastSeen
+        };
+      })
+    );
+
+    setFriends((prev) =>
+      prev.map((f) => {
+        const prof = cloudProfiles.find((p) => p.id === f.id);
+        const isOnline = isUserOnline(
+          f.id,
+          onlineUserIds,
+          prof?.updated_at,
+          prof?.is_online
+        );
+        const lastSeen = isOnline ? 'в сети' : formatLastSeen(prof?.updated_at || f.updatedAt);
+
+        if (f.isOnline === isOnline && f.lastSeen === lastSeen) {
+          return f;
+        }
+
+        return {
+          ...f,
+          isOnline,
+          lastSeen,
+          updatedAt: prof?.updated_at || f.updatedAt
+        };
+      })
+    );
+  }, [onlineUserIds, cloudProfiles, currentUser.id]);
 
   // Sync to localStorage safely
   useEffect(() => {
@@ -518,9 +640,12 @@ export function App() {
     }
   }, []);
 
-  // Supabase Realtime broadcast listener
+  // Supabase Realtime broadcast & presence listener
   useEffect(() => {
     const unsubscribe = subscribeToJustChat({
+      onPresenceSync: (onlineKeys) => {
+        setOnlineUserIds(new Set(onlineKeys));
+      },
       onNewMessage: async (msg) => {
         if (msg.senderId === currentUser.id) return;
         AudioHelper.playReceiveSound();
@@ -710,7 +835,7 @@ export function App() {
           prev.map((s) => (s.id === storyId ? { ...s, likes } : s))
         );
       }
-    });
+    }, currentUser.id);
 
     return () => unsubscribe();
   }, [currentUser.id, selectedChatId]);
@@ -1533,6 +1658,14 @@ export function App() {
       return;
     }
 
+    const isOnline = isUserOnline(
+      friend.id,
+      onlineUserIds,
+      friend.updatedAt,
+      friend.isOnline
+    );
+    const lastSeen = isOnline ? 'в сети' : (friend.lastSeen || formatLastSeen(friend.updatedAt));
+
     const newChat: Chat = {
       id: directChatId,
       type: 'direct',
@@ -1541,8 +1674,9 @@ export function App() {
       statusEmoji: friend.statusEmoji,
       isPinned: false,
       unreadCount: 0,
-      isOnline: friend.isOnline,
-      lastSeen: friend.lastSeen || 'недавно',
+      partnerId: friend.id,
+      isOnline,
+      lastSeen,
       lastMessage: {
         text: 'Чат открыт',
         createdAt: 'Только что',
@@ -1616,6 +1750,12 @@ export function App() {
           localStorage.setItem('just_sticker_packs', JSON.stringify(data.sticker_packs));
           window.dispatchEvent(new Event('just_sticker_packs_updated'));
         }
+      }
+
+      // Sync registered cloud profiles for presence & last seen
+      const allProfiles = await fetchCloudProfiles();
+      if (allProfiles && allProfiles.length > 0) {
+        setCloudProfiles(allProfiles);
       }
 
       // Sync stories from cloud

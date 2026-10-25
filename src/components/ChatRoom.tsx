@@ -230,14 +230,12 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                 <span className="text-xs truncate">
                   {chat.type === 'group' ? (
                     <span className="text-gray-400">участников: {chat.members?.length || 2}</span>
-                  ) : chat.isOnline !== false ? (
+                  ) : chat.isOnline === true ? (
                     <span className="text-[#2AABEE] font-medium">в сети</span>
-                  ) : chat.lastSeen ? (
-                    <span className="text-gray-400">
-                      {chat.lastSeen.startsWith('был') ? chat.lastSeen : `был(а) в сети ${chat.lastSeen}`}
-                    </span>
                   ) : (
-                    <span className="text-gray-400">был(а) недавно</span>
+                    <span className="text-gray-400">
+                      {chat.lastSeen || 'был(а) недавно'}
+                    </span>
                   )}
                 </span>
               )}

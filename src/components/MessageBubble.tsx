@@ -48,6 +48,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const videoSrc = (hasVideoError || !rawVideoUrl) ? '' : rawVideoUrl;
 
   useEffect(() => {
+    setHasVideoError(false);
+  }, [message.mediaUrl]);
+
+  useEffect(() => {
     if (videoRef.current) {
       videoRef.current.muted = isVideoMuted;
     }

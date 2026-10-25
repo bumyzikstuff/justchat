@@ -11,11 +11,11 @@ interface VideoNoteRecorderModalProps {
 const getSupportedVideoMime = (): string => {
   if (typeof MediaRecorder === 'undefined') return '';
   const candidates = [
-    'video/mp4;codecs=avc1,mp4a',
-    'video/mp4',
     'video/webm;codecs=vp8,opus',
     'video/webm;codecs=vp9,opus',
-    'video/webm'
+    'video/webm',
+    'video/mp4;codecs=avc1,mp4a',
+    'video/mp4'
   ];
   for (const c of candidates) {
     try {
@@ -76,6 +76,7 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
   };
 
   const handleToggleCamera = () => {
+    setIsRecording(false);
     cleanupStream();
     chunksRef.current = [];
     setSeconds(0);
@@ -100,7 +101,7 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
             const localUrl = URL.createObjectURL(blob);
             onSendVideoNote(blob, localUrl, seconds || 1);
           } else {
-            console.warn('Recorded video note was empty (0 bytes)');
+            console.warn('Recorded video note was empty (0 bytes)', recordedChunks.length);
           }
         } catch (e) {
           console.warn('Process video note error:', e);
@@ -110,12 +111,37 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
       };
 
       try {
+        if (recorder.state === 'recording') {
+          try {
+            recorder.requestData();
+          } catch (reqErr) {}
+        }
         recorder.stop();
       } catch (e) {
+        // Fallback if stop fails
+        try {
+          const mime = recorder.mimeType || getSupportedVideoMime() || 'video/webm';
+          const blob = new Blob(chunksRef.current, { type: mime });
+          if (blob.size > 0) {
+            const localUrl = URL.createObjectURL(blob);
+            onSendVideoNote(blob, localUrl, seconds || 1);
+          }
+        } catch (err) {}
         cleanupStream();
         onClose();
       }
     } else {
+      // In case recorder is already inactive but chunks were gathered
+      if (chunksRef.current.length > 0) {
+        try {
+          const mime = getSupportedVideoMime() || 'video/webm';
+          const blob = new Blob(chunksRef.current, { type: mime });
+          if (blob.size > 0) {
+            const localUrl = URL.createObjectURL(blob);
+            onSendVideoNote(blob, localUrl, seconds || 1);
+          }
+        } catch (e) {}
+      }
       cleanupStream();
       onClose();
     }
@@ -198,12 +224,12 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
           mediaRecorderRef.current = recorder;
 
           recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0 && isMounted && !hasFinishedRef.current) {
+            if (e.data && e.data.size > 0) {
               chunksRef.current.push(e.data);
             }
           };
 
-          recorder.start(1000);
+          recorder.start(200);
           if (isMounted) {
             setIsRecording(true);
             AudioHelper.playRecordStart();
@@ -333,11 +359,13 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
 
           <button
             onClick={handleFinish}
-            disabled={isUploading}
-            className="p-4 rounded-full bg-[#2AABEE] text-white hover:bg-sky-400 transition shadow-lg shadow-sky-500/30 active:scale-95 flex items-center justify-center disabled:opacity-75"
+            disabled={isUploading || !isRecording}
+            className="p-4 rounded-full bg-[#2AABEE] text-white hover:bg-sky-400 transition shadow-lg shadow-sky-500/30 active:scale-95 flex items-center justify-center disabled:opacity-50"
             title="Отправить кружочек"
           >
             {isUploading ? (
+              <Loader2 className="w-7 h-7 animate-spin" />
+            ) : !isRecording ? (
               <Loader2 className="w-7 h-7 animate-spin" />
             ) : (
               <Check className="w-7 h-7 stroke-[3]" />

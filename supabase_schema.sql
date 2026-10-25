@@ -47,20 +47,38 @@ CREATE TABLE IF NOT EXISTS public.messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 4. Enable Row Level Security (RLS) but allow anonymous access for private group
+-- 4. Create Stories table
+CREATE TABLE IF NOT EXISTS public.stories (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  author JSONB NOT NULL,
+  media_url TEXT NOT NULL,
+  media_type TEXT NOT NULL DEFAULT 'image',
+  caption TEXT,
+  created_at_timestamp BIGINT NOT NULL,
+  views_count INTEGER DEFAULT 0,
+  viewers JSONB DEFAULT '[]'::jsonb,
+  likes JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 5. Enable Row Level Security (RLS) but allow anonymous access for private group
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stories ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public read-write for profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read-write for chats" ON public.chats FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read-write for messages" ON public.messages FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read-write for stories" ON public.stories FOR ALL USING (true) WITH CHECK (true);
 
--- 5. Enable Realtime on messages & chats
+-- 6. Enable Realtime on messages, chats & stories
 ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.chats;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.stories;
 
--- 6. Storage Bucket setup for attachments, voice notes, video circles, and tracks
+-- 7. Storage Bucket setup for attachments, voice notes, video circles, and tracks
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('justchat-media', 'justchat-media', true)
 ON CONFLICT (id) DO NOTHING;

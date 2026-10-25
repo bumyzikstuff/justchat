@@ -26,7 +26,7 @@ import { UserProfileModal } from './components/UserProfileModal';
 import { CreateChatModal } from './components/CreateChatModal';
 import { AudioHelper } from './utils/audio';
 import { encryptText, decryptText } from './utils/crypto';
-import { compressStoryMedia, filterActiveStories, getStoryTimestamp, formatStoryTime } from './utils/storyHelper';
+import { compressStoryMedia, compressAvatar, filterActiveStories, getStoryTimestamp, formatStoryTime } from './utils/storyHelper';
 import { STICKER_BOT_USER, STICKER_BOT_CHAT, processStickerBotInput, getBotSession } from './services/stickerBot';
 import {
   getSupabaseConfig,
@@ -37,7 +37,20 @@ import {
   broadcastTyping,
   broadcastDeleteMessage,
   broadcastEditMessage,
-  broadcastDeleteChat
+  broadcastDeleteChat,
+  broadcastProfileUpdated,
+  broadcastNewStory,
+  broadcastDeleteStory,
+  broadcastStoryLike,
+  saveMessageToCloud,
+  fetchMessagesFromCloud,
+  deleteMessageInCloud,
+  editMessageInCloud,
+  updateReactionsInCloud,
+  saveStoryToCloud,
+  fetchStoriesFromCloud,
+  deleteStoryFromCloud,
+  updateStoryLikesInCloud
 } from './services/supabase';
 
 export function App() {
@@ -286,6 +299,22 @@ export function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Load friends' cloud stories from Supabase on startup
+  useEffect(() => {
+    fetchStoriesFromCloud().then((cloudStories) => {
+      if (cloudStories && cloudStories.length > 0) {
+        setStories((prev) => {
+          const map = new Map<string, Story>();
+          for (const s of cloudStories) map.set(s.id, s);
+          for (const s of prev) {
+            if (!map.has(s.id)) map.set(s.id, s);
+          }
+          return filterActiveStories(Array.from(map.values()));
+        });
+      }
+    });
+  }, []);
+
   // Auto-clean any legacy ghost users or test bots from storage on startup
   useEffect(() => {
     setFriends((prev) => {
@@ -375,9 +404,13 @@ export function App() {
       .single()
       .then(({ data, error }) => {
         if (!error && data) {
-          // If phone has default mock data and cloud has real custom data, pull everything from cloud!
-          const isLocalDefault = (!currentUser.avatar || currentUser.avatar.includes('photo-1534528741775')) && currentUser.nickname === 'Булат';
-          if (isLocalDefault && (data.nickname !== 'Булат' || (data.avatar && !data.avatar.includes('photo-1534528741775')))) {
+          // If cloud has an avatar or profile info that differs from local, sync immediately!
+          const hasNewAvatar = data.avatar && data.avatar !== currentUser.avatar;
+          const hasNewNick = data.nickname && data.nickname !== currentUser.nickname;
+          const hasNewEmoji = data.status_emoji && data.status_emoji !== currentUser.statusEmoji;
+          const hasNewBio = data.bio !== undefined && data.bio !== currentUser.bio;
+
+          if (hasNewAvatar || hasNewNick || hasNewEmoji || hasNewBio) {
             setCurrentUser((prev) => {
               const next: User = {
                 ...prev,
@@ -385,16 +418,10 @@ export function App() {
                 avatar: data.avatar || prev.avatar,
                 statusEmoji: data.status_emoji || prev.statusEmoji,
                 statusText: data.status_text || prev.statusText,
-                bio: data.bio || prev.bio
+                bio: data.bio !== undefined ? data.bio : prev.bio
               };
               localStorage.setItem('just_user', JSON.stringify(next));
-              return next;
-            });
-          } else if (data.avatar && (!currentUser.avatar || currentUser.avatar.includes('photo-1534528741775'))) {
-            // Also sync avatar if local avatar is default unsplash
-            setCurrentUser((prev) => {
-              const next = { ...prev, avatar: data.avatar };
-              localStorage.setItem('just_user', JSON.stringify(next));
+              localStorage.setItem('bro_user', JSON.stringify(next));
               return next;
             });
           }
@@ -598,11 +625,106 @@ export function App() {
             AudioHelper.playPop(520, 0.03);
           } catch (e) {}
         }
+      },
+      onProfileUpdated: (user) => {
+        if (!user || !user.id) return;
+        if (user.id === currentUser.id) {
+          setCurrentUser((prev) => {
+            const next: User = {
+              ...prev,
+              nickname: user.nickname || prev.nickname,
+              avatar: user.avatar || prev.avatar,
+              statusEmoji: user.statusEmoji || user.status_emoji || prev.statusEmoji,
+              statusText: user.statusText || user.status_text || prev.statusText,
+              bio: user.bio !== undefined ? user.bio : prev.bio
+            };
+            localStorage.setItem('just_user', JSON.stringify(next));
+            localStorage.setItem('bro_user', JSON.stringify(next));
+            return next;
+          });
+          setSyncToast('✨ Профиль синхронизирован');
+          setTimeout(() => setSyncToast(null), 3000);
+        } else {
+          // Update friend's avatar in chats and friends list
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id.includes(user.id) || c.name === user.nickname
+                ? { ...c, avatar: user.avatar || c.avatar, name: user.nickname || c.name, statusEmoji: user.statusEmoji || user.status_emoji || c.statusEmoji }
+                : c
+            )
+          );
+          setFriends((prev) =>
+            prev.map((f) =>
+              f.id === user.id
+                ? { ...f, avatar: user.avatar || f.avatar, nickname: user.nickname || f.nickname, statusEmoji: user.statusEmoji || user.status_emoji || f.statusEmoji }
+                : f
+            )
+          );
+        }
+      },
+      onNewStory: (story) => {
+        if (!story || !story.id) return;
+        setStories((prev) => {
+          if (prev.some((s) => s.id === story.id)) return prev;
+          return [story, ...prev];
+        });
+        AudioHelper.playPop(480, 0.05);
+      },
+      onDeleteStory: ({ storyId }) => {
+        setStories((prev) => prev.filter((s) => s.id !== storyId));
+      },
+      onStoryLike: ({ storyId, likes }) => {
+        setStories((prev) =>
+          prev.map((s) => (s.id === storyId ? { ...s, likes } : s))
+        );
       }
     });
 
     return () => unsubscribe();
   }, [currentUser.id, selectedChatId]);
+
+  // Fetch messages from Supabase cloud when entering a chat
+  useEffect(() => {
+    if (!selectedChatId || selectedChatId.startsWith('chat-bot-')) return;
+    fetchMessagesFromCloud(selectedChatId, currentUser.id).then(async (cloudMsgs) => {
+      if (!cloudMsgs || cloudMsgs.length === 0) return;
+      const decrypted = await Promise.all(
+        cloudMsgs.map(async (m) => {
+          if (m.text) {
+            try {
+              const dec = await decryptText(m.text, inviteCode);
+              return { ...m, text: dec };
+            } catch (e) {
+              return m;
+            }
+          }
+          return m;
+        })
+      );
+
+      setMessages((prev) => {
+        const local = prev[selectedChatId] || [];
+        const map = new Map<string, Message>();
+        for (const m of local) map.set(m.id, m);
+        for (const m of decrypted) {
+          if (!map.has(m.id)) {
+            map.set(m.id, m);
+          } else {
+            const existing = map.get(m.id)!;
+            map.set(m.id, {
+              ...existing,
+              reactions: m.reactions || existing.reactions,
+              status: m.status || existing.status
+            });
+          }
+        }
+        return {
+          ...prev,
+          [selectedChatId]: Array.from(map.values())
+        };
+      });
+    });
+  }, [selectedChatId, currentUser.id, inviteCode]);
 
   // Modals
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
@@ -657,6 +779,23 @@ export function App() {
     setChats((prev) =>
       prev.map((c) => (c.id === chatId ? { ...c, isPinned: !c.isPinned } : c))
     );
+  };
+
+  // Helper to broadcast message live and persist to Supabase cloud
+  const persistAndBroadcastMessage = async (msg: Message, unencryptedText?: string) => {
+    const activeChat = chats.find((c) => c.id === msg.chatId);
+    let payload = msg;
+    if (unencryptedText) {
+      const encrypted = await encryptText(unencryptedText, inviteCode);
+      payload = { ...msg, text: encrypted };
+    }
+    broadcastNewMessage(payload);
+    saveMessageToCloud(payload, {
+      name: activeChat?.name,
+      type: activeChat?.type,
+      avatar: activeChat?.avatar,
+      statusEmoji: activeChat?.statusEmoji
+    });
   };
 
   // Send regular text message (with E2EE encryption before broadcasting)
@@ -738,8 +877,7 @@ export function App() {
       return;
     }
 
-    const encryptedText = await encryptText(text, inviteCode);
-    broadcastNewMessage({ ...newMsg, text: encryptedText });
+    await persistAndBroadcastMessage(newMsg, text);
   };
 
   // Send Video Note (КРУЖОЧЕК)
@@ -784,7 +922,7 @@ export function App() {
       )
     );
 
-    broadcastNewMessage(newMsg);
+    persistAndBroadcastMessage(newMsg);
   };
 
   // Send Voice Note (ГОЛОСОВОЕ)
@@ -831,7 +969,7 @@ export function App() {
       )
     );
 
-    broadcastNewMessage(newMsg);
+    persistAndBroadcastMessage(newMsg);
   };
 
   // Send Cat Sticker (СТИКЕР С КОТИКОМ)
@@ -876,7 +1014,7 @@ export function App() {
       )
     );
 
-    broadcastNewMessage(newMsg);
+    persistAndBroadcastMessage(newMsg);
   };
 
   // Send Track (МУЗЫКА С ПЛЕЕРОМ)
@@ -926,7 +1064,7 @@ export function App() {
       )
     );
 
-    broadcastNewMessage(newMsg);
+    persistAndBroadcastMessage(newMsg);
   };
 
   // Send photo / image in chat
@@ -1008,7 +1146,7 @@ export function App() {
       return;
     }
 
-    broadcastNewMessage(newMsg);
+    persistAndBroadcastMessage(newMsg);
   };
 
   // Send video file attachment in chat
@@ -1053,12 +1191,14 @@ export function App() {
       )
     );
 
-    broadcastNewMessage(newMsg);
+    persistAndBroadcastMessage(newMsg);
   };
 
   // Handle emoji reactions (❤️, 🔥, 😂, 👍, 👎, 😮)
   const handleToggleReaction = (messageId: string, emoji: string) => {
     if (!selectedChatId) return;
+
+    let updatedReactions: Record<string, string[]> = {};
 
     setMessages((prev) => {
       const chatMsgs = prev[selectedChatId];
@@ -1071,12 +1211,13 @@ export function App() {
           const nextList = currentList.includes(currentUser.id)
             ? currentList.filter((id) => id !== currentUser.id)
             : [...currentList, currentUser.id];
+          updatedReactions = {
+            ...(m.reactions || {}),
+            [emoji]: nextList
+          };
           return {
             ...m,
-            reactions: {
-              ...m.reactions,
-              [emoji]: nextList
-            }
+            reactions: updatedReactions
           };
         })
       };
@@ -1092,6 +1233,7 @@ export function App() {
     }
 
     broadcastReaction(messageId, emoji, currentUser.id, selectedChatId);
+    updateReactionsInCloud(messageId, updatedReactions);
   };
 
   // Handle typing indicator emission
@@ -1175,6 +1317,8 @@ export function App() {
           };
           setStories((prev) => [newStory, ...filterActiveStories(prev)]);
           setActiveStoryId(newStory.id);
+          saveStoryToCloud(newStory);
+          broadcastNewStory(newStory);
         } catch (err) {
           console.error('Failed to process story:', err);
           alert('Ошибка при обработке файла для истории.');
@@ -1189,16 +1333,19 @@ export function App() {
     AudioHelper.playPop(300, 0.08);
     setStories((prev) => prev.filter((s) => s.id !== storyId));
     setActiveStoryId(null);
+    deleteStoryFromCloud(storyId);
+    broadcastDeleteStory(storyId);
   };
 
   // Like / Unlike story
   const handleToggleStoryLike = (storyId: string) => {
+    let nextLikes: StoryLike[] = [];
     setStories((prev) =>
       prev.map((s) => {
         if (s.id !== storyId) return s;
         const likes = s.likes || [];
         const exists = likes.some((l) => l.id === currentUser.id);
-        const updatedLikes: StoryLike[] = exists
+        nextLikes = exists
           ? likes.filter((l) => l.id !== currentUser.id)
           : [
               ...likes,
@@ -1210,9 +1357,11 @@ export function App() {
                 likedAt: 'Только что'
               }
             ];
-        return { ...s, likes: updatedLikes };
+        return { ...s, likes: nextLikes };
       })
     );
+    updateStoryLikesInCloud(storyId, nextLikes);
+    broadcastStoryLike(storyId, nextLikes);
   };
 
   // Story next / prev navigation
@@ -1237,6 +1386,8 @@ export function App() {
     const nextUser = { ...currentUser, ...updated };
     setCurrentUser(nextUser);
     localStorage.setItem('just_user', JSON.stringify(nextUser));
+    localStorage.setItem('bro_user', JSON.stringify(nextUser));
+    broadcastProfileUpdated(nextUser);
   };
 
   // Logout / Switch account to test login screen
@@ -1251,17 +1402,18 @@ export function App() {
     localStorage.setItem('just_invite_code', newCode);
   };
 
-  // Upload own avatar photo from device
-  const handlePhotoUpload = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      if (typeof e.target?.result === 'string') {
-        const nextUser = { ...currentUser, avatar: e.target.result };
-        setCurrentUser(nextUser);
-        localStorage.setItem('just_user', JSON.stringify(nextUser));
-      }
-    };
-    reader.readAsDataURL(file);
+  // Upload own avatar photo from device (compressed to 500x500 for lightning speed)
+  const handlePhotoUpload = async (file: File) => {
+    try {
+      const compressedDataUrl = await compressAvatar(file);
+      const nextUser = { ...currentUser, avatar: compressedDataUrl };
+      setCurrentUser(nextUser);
+      localStorage.setItem('just_user', JSON.stringify(nextUser));
+      localStorage.setItem('bro_user', JSON.stringify(nextUser));
+      broadcastProfileUpdated(nextUser);
+    } catch (e) {
+      console.warn('Avatar compression error:', e);
+    }
   };
 
   // Start or open direct chat with a user found by @username
@@ -1372,7 +1524,7 @@ export function App() {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, lastMessage: undefined } : c));
   };
 
-  // Pull-to-refresh handler (syncs cloud profiles, stickers & status)
+  // Pull-to-refresh handler (syncs cloud profiles, stickers, stories & active chat)
   const handlePullRefresh = async () => {
     const client = getSupabaseClient();
     if (!client) return;
@@ -1384,21 +1536,65 @@ export function App() {
         .eq('id', currentUser.id)
         .single();
       if (data) {
-        if (data.nickname && data.avatar) {
+        if (data.nickname || data.avatar) {
           const updatedUser: User = {
             ...currentUser,
-            nickname: data.nickname,
-            avatar: data.avatar,
+            nickname: data.nickname || currentUser.nickname,
+            avatar: data.avatar || currentUser.avatar,
             statusEmoji: data.status_emoji || currentUser.statusEmoji,
             statusText: data.status_text || currentUser.statusText,
-            bio: data.bio || currentUser.bio
+            bio: data.bio !== undefined ? data.bio : currentUser.bio
           };
           setCurrentUser(updatedUser);
           localStorage.setItem('just_user', JSON.stringify(updatedUser));
+          localStorage.setItem('bro_user', JSON.stringify(updatedUser));
         }
         if (data.sticker_packs && Array.isArray(data.sticker_packs) && data.sticker_packs.length > 0) {
           localStorage.setItem('just_sticker_packs', JSON.stringify(data.sticker_packs));
           window.dispatchEvent(new Event('just_sticker_packs_updated'));
+        }
+      }
+
+      // Sync stories from cloud
+      const cloudStories = await fetchStoriesFromCloud();
+      if (cloudStories && cloudStories.length > 0) {
+        setStories((prev) => {
+          const map = new Map<string, Story>();
+          for (const s of cloudStories) map.set(s.id, s);
+          for (const s of prev) {
+            if (!map.has(s.id)) map.set(s.id, s);
+          }
+          return filterActiveStories(Array.from(map.values()));
+        });
+      }
+
+      // If in an active chat, sync cloud messages
+      if (selectedChatId && !selectedChatId.startsWith('chat-bot-')) {
+        const cloudMsgs = await fetchMessagesFromCloud(selectedChatId, currentUser.id);
+        if (cloudMsgs && cloudMsgs.length > 0) {
+          const decrypted = await Promise.all(
+            cloudMsgs.map(async (m) => {
+              if (m.text) {
+                try {
+                  const dec = await decryptText(m.text, inviteCode);
+                  return { ...m, text: dec };
+                } catch (e) {
+                  return m;
+                }
+              }
+              return m;
+            })
+          );
+          setMessages((prev) => {
+            const local = prev[selectedChatId] || [];
+            const map = new Map<string, Message>();
+            for (const m of local) map.set(m.id, m);
+            for (const m of decrypted) map.set(m.id, m);
+            return {
+              ...prev,
+              [selectedChatId]: Array.from(map.values())
+            };
+          });
         }
       }
     } catch (e) {}
@@ -1480,6 +1676,7 @@ export function App() {
     }
 
     broadcastDeleteMessage(selectedChatId, messageId);
+    deleteMessageInCloud(messageId);
   };
 
   // Start editing a text message
@@ -1526,6 +1723,7 @@ export function App() {
     setEditingMessage(null);
     const encryptedText = await encryptText(newText, inviteCode);
     broadcastEditMessage(selectedChatId, messageId, encryptedText);
+    editMessageInCloud(messageId, encryptedText);
   };
 
   const selectedChat = chats.find((c) => c.id === selectedChatId) || null;

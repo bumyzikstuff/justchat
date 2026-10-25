@@ -53,8 +53,21 @@ import {
   deleteStoryFromCloud,
   updateStoryLikesInCloud,
   updateOnlineStatusInCloud,
-  fetchCloudProfiles
+  fetchCloudProfiles,
+  uploadMediaToSupabase,
+  blobToDataUrl
 } from './services/supabase';
+
+const GUEST_PENDING_USER: User = {
+  id: 'user-pending',
+  nickname: 'Новый пользователь',
+  username: 'user',
+  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+  statusEmoji: '👋',
+  statusText: 'на связи 🤙',
+  bio: 'Пользователь JustChat',
+  isOnline: true
+};
 
 export function App() {
   // Current user state (with local storage persistence & device sync)
@@ -99,10 +112,13 @@ export function App() {
           isVip: parsed.isVip !== undefined ? parsed.isVip : (parsed.id === 'user-me' || parsed.username === 'bulat' || parsed.username === 'bublik')
         };
       } catch (e) {
-        return CURRENT_USER_DEFAULT;
+        return GUEST_PENDING_USER;
       }
     }
-    return CURRENT_USER_DEFAULT;
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      return CURRENT_USER_DEFAULT;
+    }
+    return GUEST_PENDING_USER;
   });
 
   // Friends & Contacts state (persisted)
@@ -155,14 +171,19 @@ export function App() {
       !c.id.includes('stickerbotв') &&
       !(c.name.toLowerCase().includes('stickerbot') && c.id !== 'chat-bot-stickerbot')
     );
-    if (!loaded.some((c: Chat) => c.id === 'chat-saved' || c.isSavedMessages)) {
-      loaded = [SAVED_MESSAGES_CHAT, ...loaded];
-    }
+    const userSavedId = `chat-saved-${currentUser.id || 'user-me'}`;
+    const userSavedChat: Chat = {
+      ...SAVED_MESSAGES_CHAT,
+      id: userSavedId
+    };
+    loaded = loaded.filter(c => !c.id.startsWith('chat-saved') && !c.isSavedMessages);
+    loaded = [userSavedChat, ...loaded];
+
     if (!loaded.some((c: Chat) => c.id === 'chat-bot-stickerbot' || c.isBot)) {
       loaded = [...loaded, STICKER_BOT_CHAT];
     }
     // For friends (non-creators), automatically include direct chat with Bublik creator
-    if (currentUser.id !== 'user-me') {
+    if (currentUser.id !== 'user-me' && currentUser.id !== 'user-pending') {
       const creatorChatId = `chat-${['user-me', currentUser.id].sort().join('-')}`;
       if (!loaded.some((c: Chat) => c.id === creatorChatId || c.name === 'Бублик')) {
         const creatorChat: Chat = {
@@ -189,10 +210,11 @@ export function App() {
     return loaded;
   });
   const [selectedChatId, setSelectedChatId] = useState<string | null>(() => {
+    const userSavedId = `chat-saved-${currentUser.id || 'user-me'}`;
     const saved = localStorage.getItem('just_chats');
     const parsed: Chat[] = saved ? JSON.parse(saved) : [];
     if (parsed.length > 0) return parsed[0].id;
-    return 'chat-saved';
+    return userSavedId;
   });
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -201,8 +223,9 @@ export function App() {
     try {
       const saved = localStorage.getItem('just_messages');
       const parsed = saved ? JSON.parse(saved) : INITIAL_MESSAGES;
-      if (!parsed['chat-saved']) {
-        parsed['chat-saved'] = INITIAL_MESSAGES['chat-saved'] || [];
+      const userSavedId = `chat-saved-${currentUser.id || 'user-me'}`;
+      if (!parsed[userSavedId]) {
+        parsed[userSavedId] = parsed['chat-saved'] || INITIAL_MESSAGES['chat-saved'] || [];
       }
       if (!parsed['chat-bot-stickerbot']) {
         parsed['chat-bot-stickerbot'] = [
@@ -269,6 +292,28 @@ export function App() {
     const matchedFriend = friends.find((f) => f.nickname === chat.name || f.username === chat.name);
     if (matchedFriend) return matchedFriend.id;
     return null;
+  };
+
+  // Verify whether a message/action is intended for the current user (STRICT ISOLATION)
+  const isChatForMe = (chatId: string, myId: string): boolean => {
+    if (!chatId || !myId) return false;
+    // Personal saved messages: strictly user's own!
+    if (chatId.startsWith('chat-saved')) {
+      return chatId === `chat-saved-${myId}`;
+    }
+    // Public general chat or official sticker bot
+    if (chatId === 'chat-general' || chatId === 'chat-bot-stickerbot') {
+      return true;
+    }
+    // Direct 1-on-1 chats: format is "chat-{id1}-{id2}"
+    if (chatId.startsWith('chat-')) {
+      const raw = chatId.replace(/^chat-/, '');
+      const parts = raw.split('-');
+      if (parts.length === 2) {
+        return parts[0] === myId || parts[1] === myId;
+      }
+    }
+    return true;
   };
 
   // Heartbeat & Online Presence lifecycle
@@ -648,6 +693,7 @@ export function App() {
       },
       onNewMessage: async (msg) => {
         if (msg.senderId === currentUser.id) return;
+        if (!isChatForMe(msg.chatId, currentUser.id)) return;
         AudioHelper.playReceiveSound();
         const decryptedText = msg.text ? await decryptText(msg.text, inviteCode) : msg.text;
         const readableMsg: Message = { ...msg, text: decryptedText, isOutgoing: false };
@@ -693,6 +739,7 @@ export function App() {
         });
       },
       onReactionToggle: ({ messageId, emoji, userId, chatId }) => {
+        if (!isChatForMe(chatId, currentUser.id)) return;
         setMessages((prev) => {
           const chatMsgs = prev[chatId];
           if (!chatMsgs) return prev;
@@ -717,12 +764,14 @@ export function App() {
       },
       onTypingStatus: ({ chatId, userId, userName, isTyping }) => {
         if (userId === currentUser.id) return;
+        if (!isChatForMe(chatId, currentUser.id)) return;
         setTypingStatus((prev) => ({
           ...prev,
           [chatId]: { userName, isTyping }
         }));
       },
       onDeleteMessage: ({ chatId, messageId }) => {
+        if (!isChatForMe(chatId, currentUser.id)) return;
         let remainingLast: Message | undefined;
         setMessages((prev) => {
           const chatMsgs = prev[chatId] || [];
@@ -752,6 +801,7 @@ export function App() {
         );
       },
       onEditMessage: async ({ chatId, messageId, text }) => {
+        if (!isChatForMe(chatId, currentUser.id)) return;
         const decryptedText = await decryptText(text, inviteCode);
         setMessages((prev) => {
           const chatMsgs = prev[chatId] || [];
@@ -764,6 +814,7 @@ export function App() {
         });
       },
       onDeleteChat: ({ chatId }) => {
+        if (!isChatForMe(chatId, currentUser.id)) return;
         setChats((prev) => prev.filter((c) => c.id !== chatId));
         setMessages((prev) => {
           const copy = { ...prev };
@@ -784,7 +835,7 @@ export function App() {
         }
       },
       onProfileUpdated: (user) => {
-        if (!user || !user.id) return;
+        if (!user || !user.id || isAuthOpen || currentUser.id === 'user-pending') return;
         if (user.id === currentUser.id) {
           setCurrentUser((prev) => {
             const next: User = {
@@ -842,7 +893,7 @@ export function App() {
 
   // Fetch messages from Supabase cloud when entering a chat
   useEffect(() => {
-    if (!selectedChatId || selectedChatId.startsWith('chat-bot-')) return;
+    if (!selectedChatId || selectedChatId.startsWith('chat-bot-') || !isChatForMe(selectedChatId, currentUser.id)) return;
     fetchMessagesFromCloud(selectedChatId, currentUser.id).then(async (cloudMsgs) => {
       if (!cloudMsgs || cloudMsgs.length === 0) return;
       const decrypted = await Promise.all(
@@ -977,7 +1028,10 @@ export function App() {
       const encrypted = await encryptText(unencryptedText, inviteCode);
       payload = { ...msg, text: encrypted };
     }
-    broadcastNewMessage(payload);
+    // Personal saved messages are private cloud storage and should NEVER be broadcast to others!
+    if (!msg.chatId.startsWith('chat-saved')) {
+      broadcastNewMessage(payload);
+    }
     saveMessageToCloud(payload, {
       name: activeChat?.name,
       type: activeChat?.type,
@@ -1068,27 +1122,29 @@ export function App() {
     await persistAndBroadcastMessage(newMsg, text);
   };
 
-  // Send Video Note (КРУЖОЧЕК)
-  const handleSendVideoNote = (mediaUrl: string, duration: number) => {
+  // Send Video Note (КРУЖОЧЕК) - INSTANT zero-delay optimistic sending
+  const handleSendVideoNote = (blob: Blob, localUrl: string, duration: number) => {
     if (!selectedChatId) return;
 
     AudioHelper.playSentSound();
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const msgId = `msg-vid-${Date.now()}`;
 
     const newMsg: Message = {
-      id: `msg-vid-${Date.now()}`,
+      id: msgId,
       chatId: selectedChatId,
       senderId: currentUser.id,
       senderName: currentUser.nickname,
       senderEmoji: currentUser.statusEmoji,
       senderAvatar: currentUser.avatar,
       type: 'video_note',
-      mediaUrl,
+      mediaUrl: localUrl,
       createdAt: timeStr,
       isOutgoing: true,
       status: 'sent'
     };
 
+    // 1. Immediately show in chat! 0ms lag!
     setMessages((prev) => ({
       ...prev,
       [selectedChatId]: [...(prev[selectedChatId] || []), newMsg]
@@ -1110,25 +1166,47 @@ export function App() {
       )
     );
 
-    persistAndBroadcastMessage(newMsg);
+    // 2. Upload to Supabase Storage in background & broadcast when ready
+    (async () => {
+      try {
+        const mime = blob.type || 'video/webm';
+        const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+        let cloudUrl = await uploadMediaToSupabase(blob, `circle_${Date.now()}.${ext}`, mime);
+        if (!cloudUrl) {
+          cloudUrl = await blobToDataUrl(blob);
+        }
+        const persistentMsg = { ...newMsg, mediaUrl: cloudUrl || localUrl };
+        persistAndBroadcastMessage(persistentMsg);
+
+        setMessages((prev) => ({
+          ...prev,
+          [selectedChatId]: (prev[selectedChatId] || []).map((m) =>
+            m.id === msgId ? { ...m, mediaUrl: persistentMsg.mediaUrl } : m
+          )
+        }));
+      } catch (err) {
+        console.warn('Background upload video note error:', err);
+      }
+    })();
   };
 
-  // Send Voice Note (ГОЛОСОВОЕ)
-  const handleSendVoiceNote = (mediaUrl: string, duration: number, waveform: number[]) => {
+  // Send Voice Note (ГОЛОСОВОЕ) - INSTANT zero-delay optimistic sending
+  const handleSendVoiceNote = (blob: Blob, localUrl: string, duration: number, waveform: number[]) => {
     if (!selectedChatId) return;
 
     AudioHelper.playSentSound();
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const msgId = `msg-voice-${Date.now()}`;
 
     const newMsg: Message = {
-      id: `msg-voice-${Date.now()}`,
+      id: msgId,
       chatId: selectedChatId,
       senderId: currentUser.id,
       senderName: currentUser.nickname,
       senderEmoji: currentUser.statusEmoji,
       senderAvatar: currentUser.avatar,
       type: 'voice',
-      mediaUrl,
+      mediaUrl: localUrl,
       audioDuration: duration,
       audioWaveform: waveform,
       createdAt: timeStr,
@@ -1136,6 +1214,7 @@ export function App() {
       status: 'sent'
     };
 
+    // 1. Immediately show in chat! 0ms lag!
     setMessages((prev) => ({
       ...prev,
       [selectedChatId]: [...(prev[selectedChatId] || []), newMsg]
@@ -1157,7 +1236,28 @@ export function App() {
       )
     );
 
-    persistAndBroadcastMessage(newMsg);
+    // 2. Upload to Supabase Storage in background & broadcast when ready
+    (async () => {
+      try {
+        const mime = blob.type || 'audio/webm';
+        const ext = mime.includes('mp4') ? 'mp4' : mime.includes('aac') ? 'aac' : 'webm';
+        let cloudUrl = await uploadMediaToSupabase(blob, `voice_${Date.now()}.${ext}`, mime);
+        if (!cloudUrl) {
+          cloudUrl = await blobToDataUrl(blob);
+        }
+        const persistentMsg = { ...newMsg, mediaUrl: cloudUrl || localUrl };
+        persistAndBroadcastMessage(persistentMsg);
+
+        setMessages((prev) => ({
+          ...prev,
+          [selectedChatId]: (prev[selectedChatId] || []).map((m) =>
+            m.id === msgId ? { ...m, mediaUrl: persistentMsg.mediaUrl } : m
+          )
+        }));
+      } catch (err) {
+        console.warn('Background upload voice note error:', err);
+      }
+    })();
   };
 
   // Send Cat Sticker (СТИКЕР С КОТИКОМ)
@@ -1582,6 +1682,7 @@ export function App() {
   const handleLogout = () => {
     localStorage.removeItem('just_user');
     localStorage.removeItem('bro_user');
+    setCurrentUser(GUEST_PENDING_USER);
     setIsAuthOpen(true);
   };
 
@@ -1771,8 +1872,8 @@ export function App() {
         });
       }
 
-      // If in an active chat, sync cloud messages
-      if (selectedChatId && !selectedChatId.startsWith('chat-bot-')) {
+      // If in an active chat, sync cloud messages (only if participant)
+      if (selectedChatId && !selectedChatId.startsWith('chat-bot-') && isChatForMe(selectedChatId, currentUser.id)) {
         const cloudMsgs = await fetchMessagesFromCloud(selectedChatId, currentUser.id);
         if (cloudMsgs && cloudMsgs.length > 0) {
           const decrypted = await Promise.all(
@@ -1987,6 +2088,15 @@ export function App() {
           onSuccess={(user) => {
             setCurrentUser(user);
             setIsAuthOpen(false);
+            const userSavedId = `chat-saved-${user.id}`;
+            setChats((prev) => {
+              const newSaved: Chat = {
+                ...SAVED_MESSAGES_CHAT,
+                id: userSavedId
+              };
+              return [newSaved, ...prev.filter((c) => !c.id.startsWith('chat-saved') && !c.isSavedMessages)];
+            });
+            setSelectedChatId(userSavedId);
           }}
         />
       )}

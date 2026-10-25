@@ -6,7 +6,7 @@ import { uploadMediaToSupabase, blobToDataUrl } from '../services/supabase';
 interface VoiceNoteRecorderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSendVoiceNote: (audioUrl: string, duration: number, waveform: number[]) => void;
+  onSendVoiceNote: (blob: Blob, localUrl: string, duration: number, waveform: number[]) => void;
 }
 
 const getSupportedAudioMime = (): string => {
@@ -52,7 +52,10 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
           mediaStreamRef.current = stream;
 
           const mimeType = getSupportedAudioMime();
-          const options = mimeType ? { mimeType } : undefined;
+          const options: MediaRecorderOptions = {
+            ...(mimeType ? { mimeType } : {}),
+            audioBitsPerSecond: 48000 // 48kbps Opus: ultra fast upload & crisp voice
+          };
           const recorder = new MediaRecorder(stream, options);
           mediaRecorderRef.current = recorder;
 
@@ -60,7 +63,7 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
             if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
           };
 
-          recorder.start(200);
+          recorder.start(150);
         }
       } catch (e) {
         console.warn('Microphone access:', e);
@@ -88,37 +91,23 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
     const finalWaveform = Array.from({ length: 24 }, () => Math.floor(Math.random() * 80) + 20);
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      setIsUploading(true);
-      mediaRecorderRef.current.onstop = async () => {
+      mediaRecorderRef.current.onstop = () => {
         try {
           const mime = mediaRecorderRef.current?.mimeType || 'audio/webm';
-          const ext = mime.includes('mp4') ? 'mp4' : mime.includes('aac') ? 'aac' : 'webm';
           const blob = new Blob(chunksRef.current, { type: mime });
-
-          let finalUrl: string | null = null;
-          try {
-            finalUrl = await uploadMediaToSupabase(blob, `voice_${Date.now()}.${ext}`, mime);
-          } catch (e) {
-            console.warn('Upload voice note error:', e);
-          }
-
-          if (!finalUrl) {
-            finalUrl = await blobToDataUrl(blob);
-          }
-
-          if (finalUrl) {
-            onSendVoiceNote(finalUrl, seconds || 1, finalWaveform);
-          }
-        } finally {
-          setIsUploading(false);
-          onClose();
+          const localUrl = URL.createObjectURL(blob);
+          onSendVoiceNote(blob, localUrl, seconds || 1, finalWaveform);
+        } catch (e) {
+          console.warn('Process voice note error:', e);
         }
+        onClose();
       };
       mediaRecorderRef.current.stop();
     } else {
       // Mock audio
       const mockAudioUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3';
-      onSendVoiceNote(mockAudioUrl, seconds || 2, finalWaveform);
+      const mockBlob = new Blob([], { type: 'audio/mp3' });
+      onSendVoiceNote(mockBlob, mockAudioUrl, seconds || 2, finalWaveform);
       onClose();
     }
   };

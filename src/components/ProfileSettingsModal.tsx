@@ -537,6 +537,10 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
             </button>
           </div>
 
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5 text-[11px] text-amber-300 leading-snug">
+            ⚠️ <b>Только для личного устройства:</b> Эта ссылка передаёт доступ к вашему профилю. <b>Не отправляйте её друзьям!</b> Чтобы пригласить друга, отправьте ему код приглашения <b>{currentCode}</b> (кнопка внизу).
+          </div>
+
           <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-[#17212b] p-3 rounded-xl border border-[#242f3d]">
             {qrDataUrl ? (
               <img 
@@ -746,17 +750,18 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Test Login Screen / Logout */}
-        <div className="mb-5">
+        {/* Logout / Switch Account */}
+        <div className="mb-5 pt-2 border-t border-[#242f3d]">
           <button
+            type="button"
             onClick={() => {
               onClose();
               onLogout();
             }}
-            className="w-full py-2 px-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl text-xs font-semibold hover:bg-rose-500/20 transition flex items-center justify-center space-x-1.5"
+            className="w-full py-2.5 px-4 bg-rose-500/15 border border-rose-500/40 text-rose-400 rounded-xl text-xs font-bold hover:bg-rose-500/25 transition flex items-center justify-center space-x-2 active:scale-95 shadow"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Проверить экран входа по коду (Выйти)</span>
+            <LogOut className="w-4 h-4" />
+            <span>Выйти из аккаунта / Создать свой профиль</span>
           </button>
         </div>
 

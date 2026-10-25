@@ -6,7 +6,7 @@ import { uploadMediaToSupabase, blobToDataUrl } from '../services/supabase';
 interface VideoNoteRecorderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSendVideoNote: (blobUrl: string, duration: number) => void;
+  onSendVideoNote: (blob: Blob, localUrl: string, duration: number) => void;
 }
 
 const getSupportedVideoMime = (): string => {
@@ -66,9 +66,13 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
             videoRef.current.play();
           }
 
-          // Start recorder with browser supported mime type
+          // Start recorder with optimized bitrates for fast sending & high quality
           const mimeType = getSupportedVideoMime();
-          const options = mimeType ? { mimeType } : undefined;
+          const options: MediaRecorderOptions = {
+            ...(mimeType ? { mimeType } : {}),
+            videoBitsPerSecond: 600000, // 600 kbps: sharp circle video, lightweight file
+            audioBitsPerSecond: 64000
+          };
           const recorder = new MediaRecorder(stream, options);
           mediaRecorderRef.current = recorder;
 
@@ -78,7 +82,7 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
             }
           };
 
-          recorder.start(250);
+          recorder.start(150);
           setIsRecording(true);
           AudioHelper.playRecordStart();
         } else {
@@ -120,37 +124,23 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
   const handleFinish = () => {
     AudioHelper.playRecordEnd();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      setIsUploading(true);
-      mediaRecorderRef.current.onstop = async () => {
+      mediaRecorderRef.current.onstop = () => {
         try {
           const mime = mediaRecorderRef.current?.mimeType || 'video/webm';
-          const ext = mime.includes('mp4') ? 'mp4' : 'webm';
           const blob = new Blob(chunksRef.current, { type: mime });
-
-          let finalUrl: string | null = null;
-          try {
-            finalUrl = await uploadMediaToSupabase(blob, `circle_${Date.now()}.${ext}`, mime);
-          } catch (e) {
-            console.warn('Video note upload failed:', e);
-          }
-
-          if (!finalUrl) {
-            finalUrl = await blobToDataUrl(blob);
-          }
-
-          if (finalUrl) {
-            onSendVideoNote(finalUrl, seconds || 1);
-          }
-        } finally {
-          setIsUploading(false);
-          onClose();
+          const localUrl = URL.createObjectURL(blob);
+          onSendVideoNote(blob, localUrl, seconds || 1);
+        } catch (e) {
+          console.warn('Process video note error:', e);
         }
+        onClose();
       };
       mediaRecorderRef.current.stop();
     } else {
       // Fallback sample circular video note
       const fallbackUrl = 'https://assets.mixkit.co/videos/preview/mixkit-young-man-exercising-in-a-gym-42616-large.mp4';
-      onSendVideoNote(fallbackUrl, seconds || 3);
+      const mockBlob = new Blob([], { type: 'video/mp4' });
+      onSendVideoNote(mockBlob, fallbackUrl, seconds || 3);
       onClose();
     }
   };

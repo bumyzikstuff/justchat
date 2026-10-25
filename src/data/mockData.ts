@@ -2,12 +2,12 @@ import { User, Story, Chat, Message, CatSticker } from '../types';
 
 export const CURRENT_USER_DEFAULT: User = {
   id: 'user-me',
-  nickname: 'Бублик',
-  username: 'bublik',
+  nickname: 'Булат',
+  username: 'bulat',
   avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  statusEmoji: '🎧', // VIP status badge
-  statusText: 'делаю лучший мессенджер',
-  bio: 'Хозяин сервера ⚡ Заходи, поболтаем',
+  statusEmoji: '👑', // VIP status badge
+  statusText: 'Создатель JustChat 👑',
+  bio: 'Основатель и главный архитектор JustChat ⚡',
   isOnline: true,
   isVip: true,
   hideLastSeen: true

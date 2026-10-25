@@ -72,7 +72,7 @@ export function App() {
         const parsed = JSON.parse(saved);
         return {
           ...parsed,
-          isVip: parsed.isVip !== undefined ? parsed.isVip : (parsed.id === 'user-me' || parsed.username === 'bublik')
+          isVip: parsed.isVip !== undefined ? parsed.isVip : (parsed.id === 'user-me' || parsed.username === 'bulat' || parsed.username === 'bublik')
         };
       } catch (e) {
         return CURRENT_USER_DEFAULT;

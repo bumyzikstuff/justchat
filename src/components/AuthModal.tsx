@@ -43,19 +43,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ validCode, onSuccess }) =>
       return;
     }
 
-    const cleanUsername = nickname.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`;
-    const isCreator = isMasterCode || cleanUsername === 'bublik' || nickname.trim().toLowerCase() === 'бублик';
+    const cleanUsername = nickname.trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`;
+    const isCreator = isMasterCode || cleanUsername === 'bulat' || cleanUsername === 'bublik' || nickname.trim().toLowerCase() === 'булат' || nickname.trim().toLowerCase() === 'бублик';
 
     const newUser: User = {
       id: isCreator ? 'user-me' : `user-${Date.now()}`,
-      nickname: isCreator ? (nickname.trim() || 'Бублик') : nickname.trim(),
-      username: isCreator ? 'bublik' : cleanUsername,
+      nickname: isCreator ? (nickname.trim() || 'Булат') : nickname.trim(),
+      username: isCreator ? 'bulat' : cleanUsername,
       avatar: isCreator
         ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
         : `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
       statusEmoji: selectedEmoji,
-      statusText: isCreator ? 'делаю лучший мессенджер' : 'на связи 🤙',
-      bio: isCreator ? 'Хозяин сервера ⚡ Заходи, поболтаем' : 'Пользователь JustChat',
+      statusText: isCreator ? 'Создатель JustChat 👑' : 'на связи 🤙',
+      bio: isCreator ? 'Основатель и главный архитектор JustChat ⚡' : 'Пользователь JustChat',
       isOnline: true,
       isVip: isCreator,
       hideLastSeen: isCreator

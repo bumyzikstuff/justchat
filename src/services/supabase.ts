@@ -68,6 +68,7 @@ export interface RealtimeCallbacks {
   onStoryLike?: (payload: { storyId: string; likes: any[] }) => void;
   onConnectionChange?: (status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR') => void;
   onPresenceSync?: (onlineUserIds: string[]) => void;
+  onForceRelogin?: (payload: { epoch: string }) => void;
 }
 
 // Subscribe to JustChat live broadcast & presence channel
@@ -182,6 +183,13 @@ export const subscribeToJustChat = (callbacks: RealtimeCallbacks, currentUserId?
   realtimeChannel.on('broadcast', { event: 'story-like' }, (payload) => {
     if (payload.payload && callbacks.onStoryLike) {
       callbacks.onStoryLike(payload.payload as { storyId: string; likes: any[] });
+    }
+  });
+
+  // Listen to global force-relogin / session purge
+  realtimeChannel.on('broadcast', { event: 'force-relogin' }, (payload) => {
+    if (payload.payload && callbacks.onForceRelogin) {
+      callbacks.onForceRelogin(payload.payload as { epoch: string });
     }
   });
 
@@ -353,6 +361,19 @@ export const broadcastStoryLike = async (storyId: string, likes: any[]) => {
     });
   } catch (e) {
     console.warn('Broadcast story like failed:', e);
+  }
+};
+
+export const broadcastForceRelogin = async (epoch: string) => {
+  if (!realtimeChannel) return;
+  try {
+    await realtimeChannel.send({
+      type: 'broadcast',
+      event: 'force-relogin',
+      payload: { epoch }
+    });
+  } catch (e) {
+    console.warn('Broadcast force relogin failed:', e);
   }
 };
 

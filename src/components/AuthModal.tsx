@@ -45,8 +45,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ validCode, onSuccess }) =>
 
     const cleanUsername = nickname.trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`;
     
-    // Only creator explicitly logging in with CREATOR2026 gets 'user-me'
-    const isCreator = enteredCode === 'CREATOR2026' && (cleanUsername === 'bulat' || cleanUsername === 'bublik' || nickname.trim().toLowerCase() === 'бублик');
+    // Creator login (nickname 'Бублик' / 'Булат') gets 'user-me'
+    const isCreator = (enteredCode === 'CREATOR2026' || enteredCode === 'VIP2026') &&
+      (cleanUsername === 'bulat' || cleanUsername === 'bublik' || nickname.trim().toLowerCase() === 'бублик' || nickname.trim().toLowerCase() === 'булат');
     const randomSuffix = Math.random().toString(36).substring(2, 7);
 
     const newUser: User = {

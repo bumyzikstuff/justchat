@@ -55,8 +55,11 @@ import {
   updateOnlineStatusInCloud,
   fetchCloudProfiles,
   uploadMediaToSupabase,
-  blobToDataUrl
+  blobToDataUrl,
+  broadcastForceRelogin
 } from './services/supabase';
+
+export const CURRENT_AUTH_EPOCH = 'epoch_justchat_reset_2026_10_25_v3';
 
 const GUEST_PENDING_USER: User = {
   id: 'user-pending',
@@ -70,6 +73,17 @@ const GUEST_PENDING_USER: User = {
 };
 
 export function App() {
+  // Global Session Purge: If stored epoch doesn't match, force logout everyone immediately!
+  if (typeof window !== 'undefined') {
+    const currentEpoch = localStorage.getItem('just_auth_epoch');
+    if (currentEpoch !== CURRENT_AUTH_EPOCH) {
+      localStorage.removeItem('just_user');
+      localStorage.removeItem('bro_user');
+      localStorage.removeItem('just_chats');
+      localStorage.setItem('just_auth_epoch', CURRENT_AUTH_EPOCH);
+    }
+  }
+
   // Current user state (with local storage persistence & device sync)
   const [currentUser, setCurrentUser] = useState<User>(() => {
     // Check if logging in via QR code / session link (?auth_session=...)
@@ -687,9 +701,21 @@ export function App() {
 
   // Supabase Realtime broadcast & presence listener
   useEffect(() => {
+    // Send force relogin broadcast so any active open tabs on other devices purge their sessions
+    broadcastForceRelogin(CURRENT_AUTH_EPOCH);
+
     const unsubscribe = subscribeToJustChat({
       onPresenceSync: (onlineKeys) => {
         setOnlineUserIds(new Set(onlineKeys));
+      },
+      onForceRelogin: ({ epoch }) => {
+        if (epoch === CURRENT_AUTH_EPOCH) {
+          localStorage.removeItem('just_user');
+          localStorage.removeItem('bro_user');
+          localStorage.removeItem('just_chats');
+          setCurrentUser(GUEST_PENDING_USER);
+          setIsAuthOpen(true);
+        }
       },
       onNewMessage: async (msg) => {
         if (msg.senderId === currentUser.id) return;

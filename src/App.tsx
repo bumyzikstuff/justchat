@@ -351,6 +351,43 @@ export function App() {
     } catch (e) {}
   }, []);
 
+  // Decrypt any locally stored encrypted messages on launch / invite code change
+  useEffect(() => {
+    let cancelled = false;
+    const sweep = async () => {
+      let changed = false;
+      const nextMessages: Record<string, Message[]> = {};
+      for (const [chatId, msgList] of Object.entries(messages)) {
+        let chatChanged = false;
+        const nextList: Message[] = [];
+        for (const msg of msgList) {
+          if (msg.text && msg.text.startsWith('enc:v1:')) {
+            try {
+              const decrypted = await decryptText(msg.text, inviteCode);
+              if (decrypted && !decrypted.includes('неверный код доступа')) {
+                nextList.push({ ...msg, text: decrypted });
+                chatChanged = true;
+                continue;
+              }
+            } catch (e) {}
+          }
+          nextList.push(msg);
+        }
+        if (chatChanged) {
+          nextMessages[chatId] = nextList;
+          changed = true;
+        }
+      }
+      if (changed && !cancelled) {
+        setMessages((prev) => ({ ...prev, ...nextMessages }));
+      }
+    };
+    sweep();
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteCode]);
+
   // Auto-sync current user profile and custom sticker packs to global Supabase profiles table
   useEffect(() => {
     const client = getSupabaseClient();
@@ -697,6 +734,8 @@ export function App() {
         })
       );
 
+      const isLocked = (t?: string) => !t || t.includes('неверный код доступа') || t.startsWith('enc:v1:');
+
       setMessages((prev) => {
         const local = prev[selectedChatId] || [];
         const map = new Map<string, Message>();
@@ -706,16 +745,45 @@ export function App() {
             map.set(m.id, m);
           } else {
             const existing = map.get(m.id)!;
+            const textToUse = !isLocked(m.text)
+              ? m.text
+              : !isLocked(existing.text)
+                ? existing.text
+                : (m.text || existing.text);
+
             map.set(m.id, {
               ...existing,
+              text: textToUse,
+              mediaUrl: m.mediaUrl || existing.mediaUrl,
               reactions: m.reactions || existing.reactions,
               status: m.status || existing.status
             });
           }
         }
+        const updatedList = Array.from(map.values());
+
+        const lastMsg = updatedList[updatedList.length - 1];
+        if (lastMsg) {
+          setChats((chatsPrev) =>
+            chatsPrev.map((c) =>
+              c.id === selectedChatId
+                ? {
+                    ...c,
+                    lastMessage: {
+                      text: lastMsg.text || (lastMsg.type === 'video' ? '🎬 Видео' : lastMsg.type === 'image' ? '📷 Фото' : lastMsg.type === 'voice' ? '🎙 Голосовое' : lastMsg.type === 'video_note' ? '📹 Кружочек' : lastMsg.type === 'sticker' ? 'Стикер 🎨' : 'Сообщение'),
+                      createdAt: lastMsg.createdAt,
+                      type: lastMsg.type,
+                      isOutgoing: lastMsg.isOutgoing
+                    }
+                  }
+                : c
+            )
+          );
+        }
+
         return {
           ...prev,
-          [selectedChatId]: Array.from(map.values())
+          [selectedChatId]: updatedList
         };
       });
     });
@@ -1580,14 +1648,52 @@ export function App() {
               return m;
             })
           );
+          const isLocked = (t?: string) => !t || t.includes('неверный код доступа') || t.startsWith('enc:v1:');
           setMessages((prev) => {
             const local = prev[selectedChatId] || [];
             const map = new Map<string, Message>();
             for (const m of local) map.set(m.id, m);
-            for (const m of decrypted) map.set(m.id, m);
+            for (const m of decrypted) {
+              if (!map.has(m.id)) {
+                map.set(m.id, m);
+              } else {
+                const existing = map.get(m.id)!;
+                const textToUse = !isLocked(m.text)
+                  ? m.text
+                  : !isLocked(existing.text)
+                    ? existing.text
+                    : (m.text || existing.text);
+                map.set(m.id, {
+                  ...existing,
+                  text: textToUse,
+                  mediaUrl: m.mediaUrl || existing.mediaUrl,
+                  reactions: m.reactions || existing.reactions,
+                  status: m.status || existing.status
+                });
+              }
+            }
+            const updatedList = Array.from(map.values());
+            const lastMsg = updatedList[updatedList.length - 1];
+            if (lastMsg) {
+              setChats((chatsPrev) =>
+                chatsPrev.map((c) =>
+                  c.id === selectedChatId
+                    ? {
+                        ...c,
+                        lastMessage: {
+                          text: lastMsg.text || (lastMsg.type === 'video' ? '🎬 Видео' : lastMsg.type === 'image' ? '📷 Фото' : lastMsg.type === 'voice' ? '🎙 Голосовое' : lastMsg.type === 'video_note' ? '📹 Кружочек' : lastMsg.type === 'sticker' ? 'Стикер 🎨' : 'Сообщение'),
+                          createdAt: lastMsg.createdAt,
+                          type: lastMsg.type,
+                          isOutgoing: lastMsg.isOutgoing
+                        }
+                      }
+                    : c
+                )
+              );
+            }
             return {
               ...prev,
-              [selectedChatId]: Array.from(map.values())
+              [selectedChatId]: updatedList
             };
           });
         }

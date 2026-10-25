@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User } from '../types';
 import { AVAILABLE_EMOJIS } from '../data/mockData';
-import { X, Sparkles, Check, Copy, Shield, LogOut, KeyRound, Link as LinkIcon, Camera, Upload, Bell, Volume2, VolumeX, Smartphone, CheckCircle2, Cloud, Database, EyeOff } from 'lucide-react';
+import { X, Sparkles, Check, Copy, Shield, LogOut, KeyRound, Link as LinkIcon, Camera, Upload, Bell, Volume2, VolumeX, Smartphone, CheckCircle2, Cloud, Database, EyeOff, QrCode } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AudioHelper } from '../utils/audio';
 import { getSupabaseConfig, resetSupabaseClient } from '../services/supabase';
@@ -46,6 +46,23 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const [currentCode, setCurrentCode] = useState(inviteCode);
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedDeviceLink, setCopiedDeviceLink] = useState(false);
+
+  const getDeviceLoginUrl = () => {
+    try {
+      const payload = btoa(unescape(encodeURIComponent(JSON.stringify(currentUser))));
+      return `${window.location.origin}/?auth_session=${payload}`;
+    } catch (e) {
+      return window.location.origin;
+    }
+  };
+
+  const handleCopyDeviceLink = () => {
+    navigator.clipboard.writeText(getDeviceLoginUrl());
+    setCopiedDeviceLink(true);
+    AudioHelper.playSentSound();
+    setTimeout(() => setCopiedDeviceLink(false), 2000);
+  };
 
   // Supabase cloud settings
   const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('just_supabase_url') || import.meta.env.VITE_SUPABASE_URL || '');
@@ -398,6 +415,45 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* LINK DEVICE / LOGIN FROM PHONE QR CODE */}
+        <div className="bg-[#0e1621] border border-[#2AABEE]/40 rounded-2xl p-4 mb-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-1.5 text-[#2AABEE] text-xs font-bold">
+              <Smartphone className="w-4 h-4" />
+              <span>Войти с телефона (QR-код и ссылка)</span>
+            </div>
+            <span className="text-[10px] bg-[#2AABEE]/20 text-sky-300 px-2 py-0.5 rounded-full font-bold">
+              Вход в 1 клик
+            </span>
+          </div>
+
+          <p className="text-xs text-gray-300 leading-relaxed">
+            Отсканируй этот QR-код камерой телефона или скопируй ссылку — телефон мгновенно войдёт в твой аккаунт с VIP-статусом!
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-[#17212b] p-3 rounded-xl border border-[#242f3d]">
+            <img 
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(getDeviceLoginUrl())}`} 
+              alt="QR Code" 
+              className="w-28 h-28 rounded-xl bg-white p-1.5 shadow"
+            />
+            <div className="flex-1 space-y-2 text-center sm:text-left w-full">
+              <p className="text-[11px] text-gray-400">
+                1. Наведи камеру телефона на этот QR-код<br/>
+                2. Либо нажми кнопку ниже и отправь ссылку себе
+              </p>
+              <button
+                type="button"
+                onClick={handleCopyDeviceLink}
+                className="w-full py-2 px-3 rounded-xl bg-[#2AABEE] hover:bg-sky-400 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 transition active:scale-95 shadow"
+              >
+                {copiedDeviceLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                <span>{copiedDeviceLink ? 'Ссылка скопирована!' : 'Скопировать ссылку для входа'}</span>
+              </button>
             </div>
           </div>
         </div>

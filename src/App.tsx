@@ -39,8 +39,33 @@ import {
 } from './services/supabase';
 
 export function App() {
-  // Current user state (with local storage persistence)
+  // Current user state (with local storage persistence & device sync)
   const [currentUser, setCurrentUser] = useState<User>(() => {
+    // Check if logging in via QR code / session link (?auth_session=...)
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const sessionToken = params.get('auth_session');
+        if (sessionToken) {
+          const jsonStr = decodeURIComponent(escape(atob(sessionToken)));
+          const parsed = JSON.parse(jsonStr);
+          if (parsed && (parsed.id || parsed.nickname)) {
+            const fullUser: User = {
+              ...CURRENT_USER_DEFAULT,
+              ...parsed,
+              isVip: parsed.isVip !== undefined ? parsed.isVip : true
+            };
+            localStorage.setItem('just_user', JSON.stringify(fullUser));
+            localStorage.setItem('bro_user', JSON.stringify(fullUser));
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return fullUser;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse auth_session', e);
+      }
+    }
+
     const saved = localStorage.getItem('just_user') || localStorage.getItem('bro_user');
     if (saved) {
       try {
@@ -88,8 +113,12 @@ export function App() {
     return localStorage.getItem('just_invite_code') || localStorage.getItem('bro_invite_code') || 'JUST2026';
   });
 
-  // Check if first-time user
+  // Check if first-time user (suppress if session token in URL)
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('auth_session')) return false;
+    }
     return !localStorage.getItem('just_user') && !localStorage.getItem('bro_user');
   });
 

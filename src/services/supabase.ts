@@ -1,15 +1,18 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { Message } from '../types';
 
-// Read config from env or user custom storage
+// Read config from env, user custom storage or baked-in defaults
 export const getSupabaseConfig = () => {
+  const defaultUrl = 'https://qceozwmesqvmiwhdblov.supabase.co';
+  const defaultKey = 'sb_publishable_O0MQgsGOjVTa5njVYDJvmw_PCJwcdqD';
+
   const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
   const customUrl = localStorage.getItem('just_supabase_url') || '';
   const customKey = localStorage.getItem('just_supabase_anon_key') || '';
 
-  const url = customUrl || envUrl;
-  const anonKey = customKey || envKey;
+  const url = customUrl || envUrl || defaultUrl;
+  const anonKey = customKey || envKey || defaultKey;
 
   return {
     url,

@@ -29,6 +29,7 @@ import { compressStoryMedia, filterActiveStories, getStoryTimestamp, formatStory
 import { STICKER_BOT_USER, STICKER_BOT_CHAT, processStickerBotInput, getBotSession } from './services/stickerBot';
 import {
   getSupabaseConfig,
+  getSupabaseClient,
   subscribeToJustChat,
   broadcastNewMessage,
   broadcastReaction,
@@ -284,6 +285,29 @@ export function App() {
       return filtered;
     });
   }, []);
+
+  // Auto-sync current user profile to global Supabase profiles table
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client || !currentUser || !currentUser.id) return;
+
+    client
+      .from('profiles')
+      .upsert({
+        id: currentUser.id,
+        nickname: currentUser.nickname,
+        username: currentUser.username,
+        avatar: currentUser.avatar && currentUser.avatar.startsWith('http') ? currentUser.avatar : null,
+        status_emoji: currentUser.statusEmoji || '🔥',
+        status_text: currentUser.statusText || '',
+        bio: currentUser.bio || '',
+        is_online: true,
+        updated_at: new Date().toISOString()
+      })
+      .then(({ error }) => {
+        if (error) console.warn('Supabase profile sync note:', error.message);
+      });
+  }, [currentUser]);
 
   // Supabase Realtime broadcast listener
   useEffect(() => {

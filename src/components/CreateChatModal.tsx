@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Chat } from '../types';
-import { X, Search, Users, UserPlus, AtSign, Check, Plus, MessageCircle, Bot, Trash2 } from 'lucide-react';
+import { X, Search, Users, UserPlus, AtSign, Check, Plus, MessageCircle, Bot, Trash2, Loader2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { STICKER_BOT_USER } from '../services/stickerBot';
+import { getSupabaseClient } from '../services/supabase';
 
 interface CreateChatModalProps {
   isOpen: boolean;
@@ -41,9 +42,60 @@ export const CreateChatModal: React.FC<CreateChatModalProps> = ({
     ...friends.filter((f) => f.id !== STICKER_BOT_USER.id && (!currentUserId || f.id !== currentUserId))
   ];
 
-  // Filter friends & bots by query (by username, nickname or keywords)
+  // Filter local friends & bots by query
   const cleanQuery = usernameQuery.replace(/^@/, '').toLowerCase().trim();
-  const searchResults = cleanQuery
+  const [remoteUsers, setRemoteUsers] = useState<User[]>([]);
+  const [isSearchingRemote, setIsSearchingRemote] = useState(false);
+
+  // Live remote search on Supabase profiles table
+  useEffect(() => {
+    if (!cleanQuery) {
+      setRemoteUsers([]);
+      return;
+    }
+
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    let active = true;
+    setIsSearchingRemote(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const { data, error } = await client
+          .from('profiles')
+          .select('*')
+          .or(`username.ilike.%${cleanQuery}%,nickname.ilike.%${cleanQuery}%`)
+          .limit(10);
+
+        if (!error && data && active) {
+          const mapped: User[] = data.map((p) => ({
+            id: p.id,
+            nickname: p.nickname,
+            username: p.username,
+            avatar: p.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+            statusEmoji: p.status_emoji || '🔥',
+            statusText: p.status_text || 'на связи 🤙',
+            bio: p.bio,
+            isOnline: p.is_online ?? true,
+            isVip: p.id === 'user-me' || p.username === 'bulat'
+          }));
+          setRemoteUsers(mapped.filter((u) => u.id !== currentUserId));
+        }
+      } catch (e) {
+        console.warn('Supabase profile search note:', e);
+      } finally {
+        if (active) setIsSearchingRemote(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [cleanQuery, currentUserId]);
+
+  const localResults = cleanQuery
     ? allSearchable.filter(
         (f) =>
           f.username.toLowerCase().includes(cleanQuery) ||
@@ -51,6 +103,14 @@ export const CreateChatModal: React.FC<CreateChatModalProps> = ({
           (f.isBot && ('стикеры'.includes(cleanQuery) || 'бот'.includes(cleanQuery) || 'создать'.includes(cleanQuery)))
       )
     : allSearchable;
+
+  // Merge local contacts with live Supabase database results without duplicates
+  const searchResults = [...localResults];
+  for (const r of remoteUsers) {
+    if (!searchResults.some((u) => u.id === r.id || u.username === r.username)) {
+      searchResults.push(r);
+    }
+  }
 
   const toggleSelectFriend = (friendId: string) => {
     setSelectedFriends((prev) =>
@@ -124,10 +184,13 @@ export const CreateChatModal: React.FC<CreateChatModalProps> = ({
                 value={usernameQuery}
                 onChange={(e) => setUsernameQuery(e.target.value)}
                 placeholder="Введи @юзернейм (например: @alex)"
-                className="w-full bg-[#0e1621] border border-[#242f3d] rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-gray-500 outline-none focus:border-[#2AABEE]"
+                className="w-full bg-[#0e1621] border border-[#242f3d] rounded-2xl pl-10 pr-9 py-2.5 text-xs text-white placeholder-gray-500 outline-none focus:border-[#2AABEE]"
                 autoFocus
               />
               <AtSign className="absolute left-3.5 top-2.5 w-4 h-4 text-[#2AABEE]" />
+              {isSearchingRemote && (
+                <Loader2 className="absolute right-3.5 top-2.5 w-4 h-4 text-[#2AABEE] animate-spin" />
+              )}
             </div>
 
             <p className="text-[11px] text-gray-400 px-1">

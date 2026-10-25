@@ -15,24 +15,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ validCode, onSuccess }) =>
   const [selectedEmoji, setSelectedEmoji] = useState('🔥');
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-fill code from URL query string ?invite=... if present
+  // Auto-fill code ONLY from URL query string ?invite=... if present
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const codeFromUrl = params.get('invite');
     if (codeFromUrl) {
       setInviteCode(codeFromUrl.toUpperCase());
-    } else {
-      setInviteCode(validCode); // default prefill for convenience
     }
-  }, [validCode]);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Validate invite code
-    if (inviteCode.trim().toUpperCase() !== validCode.trim().toUpperCase()) {
-      setError(`Неверный секретный код! Код для входа: ${validCode}`);
+    // Validate invite code without leaking it in error
+    if (!inviteCode.trim() || inviteCode.trim().toUpperCase() !== validCode.trim().toUpperCase()) {
+      setError('Неверный секретный код! Узнай правильный код у создателя мессенджера.');
       return;
     }
 
@@ -104,8 +102,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ validCode, onSuccess }) =>
               />
               <KeyRound className="absolute right-3 top-2.5 w-4 h-4 text-gray-500" />
             </div>
-            <p className="text-[10px] text-gray-400 mt-1">
-              Действующий код: <span className="text-[#2AABEE] font-bold font-mono">{validCode}</span>
+            <p className="text-[10px] text-gray-500 mt-1">
+              Узнай секретный код у создателя мессенджера
             </p>
           </div>
 

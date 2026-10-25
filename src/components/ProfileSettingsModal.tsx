@@ -49,10 +49,25 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedDeviceLink, setCopiedDeviceLink] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [qrError, setQrError] = useState(false);
 
   const getDeviceLoginUrl = () => {
     try {
-      const payload = btoa(unescape(encodeURIComponent(JSON.stringify(currentUser))));
+      // Create minimal payload (under 150 bytes) so it fits comfortably in a standard QR code
+      const minimalUser: Partial<User> = {
+        id: currentUser.id,
+        nickname: currentUser.nickname,
+        username: currentUser.username,
+        statusEmoji: currentUser.statusEmoji,
+        statusText: currentUser.statusText || '',
+        isVip: currentUser.isVip || false,
+        hideLastSeen: currentUser.hideLastSeen ?? true
+      };
+      // Only include avatar if it's a short external URL, never a giant Base64 Data URL!
+      if (currentUser.avatar && currentUser.avatar.startsWith('http')) {
+        minimalUser.avatar = currentUser.avatar;
+      }
+      const payload = btoa(unescape(encodeURIComponent(JSON.stringify(minimalUser))));
       return `${window.location.origin}/?auth_session=${payload}`;
     } catch (e) {
       return window.location.origin;
@@ -61,17 +76,25 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setQrError(false);
       const url = getDeviceLoginUrl();
       QRCode.toDataURL(url, {
         width: 240,
         margin: 1,
+        errorCorrectionLevel: 'L',
         color: {
           dark: '#0e1621',
           light: '#ffffff'
         }
       })
-        .then((dataUri) => setQrDataUrl(dataUri))
-        .catch((err) => console.error('QR code error', err));
+        .then((dataUri) => {
+          setQrDataUrl(dataUri);
+          setQrError(false);
+        })
+        .catch((err) => {
+          console.error('QR code error', err);
+          setQrError(true);
+        });
     }
   }, [isOpen, currentUser]);
 
@@ -462,9 +485,14 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                 alt="QR Code" 
                 className="w-28 h-28 rounded-xl bg-white p-1.5 shadow object-contain"
               />
+            ) : qrError ? (
+              <div className="w-28 h-28 rounded-xl bg-[#17212b] border border-amber-500/40 p-2 flex flex-col items-center justify-center text-center text-[10px] text-amber-300">
+                <QrCode className="w-6 h-6 mb-1 text-amber-400" />
+                <span>Используй кнопку справа 👉</span>
+              </div>
             ) : (
               <div className="w-28 h-28 rounded-xl bg-[#0e1621] border border-[#242f3d] flex items-center justify-center text-xs text-gray-400">
-                <span className="animate-pulse">Генерация...</span>
+                <span className="animate-pulse">QR-код...</span>
               </div>
             )}
             <div className="flex-1 space-y-2 text-center sm:text-left w-full">

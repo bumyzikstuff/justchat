@@ -51,6 +51,11 @@ export class ErrorBoundary extends Component<Props, State> {
               <p className="text-xs text-gray-400 mt-1 leading-relaxed">
                 При обработке данных возник сбой. Нажмите кнопку ниже, чтобы перезапустить JustChat.
               </p>
+              {this.state.error?.message && (
+                <div className="mt-2 text-left bg-black/40 rounded-xl p-2.5 text-[11px] text-rose-300 font-mono break-all max-h-24 overflow-y-auto border border-rose-500/20">
+                  {this.state.error.message}
+                </div>
+              )}
             </div>
             <div className="w-full space-y-2 pt-2">
               <button

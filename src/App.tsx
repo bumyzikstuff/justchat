@@ -1821,6 +1821,8 @@ export function App() {
           onSearchChange={setSearchQuery}
           onOpenCreateChat={() => setIsCreateChatOpen(true)}
           onRefresh={handlePullRefresh}
+          onStartDirectChat={handleStartDirectChat}
+          currentUserId={currentUser.id}
         />
       </div>
 

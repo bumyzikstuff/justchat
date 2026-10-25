@@ -34,23 +34,17 @@ export const CreateChatModal: React.FC<CreateChatModalProps> = ({
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [groupEmoji, setGroupEmoji] = useState('💬');
 
-  if (!isOpen) return null;
-
-  // Combine friends with official bots for global discovery, excluding currentUser
-  const allSearchable = [
-    STICKER_BOT_USER,
-    ...friends.filter((f) => f.id !== STICKER_BOT_USER.id && (!currentUserId || f.id !== currentUserId))
-  ];
-
-  // Filter local friends & bots by query
-  const cleanQuery = usernameQuery.replace(/^@/, '').toLowerCase().trim();
+  // Live remote search states (must be declared BEFORE any conditional return!)
   const [remoteUsers, setRemoteUsers] = useState<User[]>([]);
   const [isSearchingRemote, setIsSearchingRemote] = useState(false);
 
+  const cleanQuery = (usernameQuery || '').replace(/^@/, '').toLowerCase().trim();
+
   // Live remote search on Supabase profiles table
   useEffect(() => {
-    if (!cleanQuery) {
+    if (!isOpen || !cleanQuery) {
       setRemoteUsers([]);
+      setIsSearchingRemote(false);
       return;
     }
 
@@ -71,8 +65,8 @@ export const CreateChatModal: React.FC<CreateChatModalProps> = ({
         if (!error && data && active) {
           const mapped: User[] = data.map((p) => ({
             id: p.id,
-            nickname: p.nickname,
-            username: p.username,
+            nickname: p.nickname || 'Пользователь',
+            username: p.username || '',
             avatar: p.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
             statusEmoji: p.status_emoji || '🔥',
             statusText: p.status_text || 'на связи 🤙',
@@ -93,13 +87,21 @@ export const CreateChatModal: React.FC<CreateChatModalProps> = ({
       active = false;
       clearTimeout(timer);
     };
-  }, [cleanQuery, currentUserId]);
+  }, [isOpen, cleanQuery, currentUserId]);
+
+  if (!isOpen) return null;
+
+  // Combine friends with official bots for global discovery, excluding currentUser
+  const allSearchable = [
+    STICKER_BOT_USER,
+    ...friends.filter((f) => f.id !== STICKER_BOT_USER.id && (!currentUserId || f.id !== currentUserId))
+  ];
 
   const localResults = cleanQuery
     ? allSearchable.filter(
         (f) =>
-          f.username.toLowerCase().includes(cleanQuery) ||
-          f.nickname.toLowerCase().includes(cleanQuery) ||
+          (f.username || '').toLowerCase().includes(cleanQuery) ||
+          (f.nickname || '').toLowerCase().includes(cleanQuery) ||
           (f.isBot && ('стикеры'.includes(cleanQuery) || 'бот'.includes(cleanQuery) || 'создать'.includes(cleanQuery)))
       )
     : allSearchable;

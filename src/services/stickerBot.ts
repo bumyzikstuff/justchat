@@ -1,4 +1,5 @@
 import { User, Chat, Message, StickerPack, CustomSticker } from '../types';
+import { getSupabaseClient } from './supabase';
 
 export const STICKER_BOT_AVATAR = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%232AABEE"/><stop offset="100%" stop-color="%238b5cf6"/></linearGradient></defs><rect width="128" height="128" rx="64" fill="url(%23bg)"/><text x="50%" y="54%" font-size="64" text-anchor="middle" dominant-baseline="middle">🤖</text></svg>`;
 
@@ -56,9 +57,22 @@ export function getStoredStickerPacks(): StickerPack[] {
 export function saveStoredStickerPacks(packs: StickerPack[]) {
   try {
     localStorage.setItem(STORAGE_KEY_PACKS, JSON.stringify(packs));
+    window.dispatchEvent(new Event('just_sticker_packs_updated'));
   } catch (e) {
     console.warn('Failed to save sticker packs to localStorage (quota exceeded?):', e);
   }
+
+  // Cloud sync to Supabase profiles
+  try {
+    const client = getSupabaseClient();
+    const rawUser = localStorage.getItem('just_user');
+    if (client && rawUser) {
+      const user = JSON.parse(rawUser);
+      if (user && user.id) {
+        client.from('profiles').update({ sticker_packs: packs }).eq('id', user.id).then();
+      }
+    }
+  } catch (e) {}
 }
 
 export function getBotSession(): StickerBotSession {

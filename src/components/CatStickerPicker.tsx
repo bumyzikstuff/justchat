@@ -27,6 +27,12 @@ export const CatStickerPicker: React.FC<CatStickerPickerProps> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    const handleUpdate = () => setCustomPacks(getStoredStickerPacks());
+    window.addEventListener('just_sticker_packs_updated', handleUpdate);
+    return () => window.removeEventListener('just_sticker_packs_updated', handleUpdate);
+  }, []);
+
   if (!isOpen) return null;
 
   const filteredCatStickers = selectedCat === 'all'

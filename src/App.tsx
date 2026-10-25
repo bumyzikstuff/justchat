@@ -286,28 +286,72 @@ export function App() {
     });
   }, []);
 
-  // Auto-sync current user profile to global Supabase profiles table
+  // Auto-sync current user profile and custom sticker packs to global Supabase profiles table
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client || !currentUser || !currentUser.id) return;
+
+    let packs: any[] = [];
+    try {
+      const raw = localStorage.getItem('just_sticker_packs');
+      if (raw) packs = JSON.parse(raw);
+    } catch (e) {}
+
+    const payload: any = {
+      id: currentUser.id,
+      nickname: currentUser.nickname,
+      username: currentUser.username,
+      avatar: currentUser.avatar || null,
+      status_emoji: currentUser.statusEmoji || '🔥',
+      status_text: currentUser.statusText || '',
+      bio: currentUser.bio || '',
+      is_online: true,
+      updated_at: new Date().toISOString()
+    };
+
+    if (packs.length > 0) {
+      payload.sticker_packs = packs;
+    }
+
+    client
+      .from('profiles')
+      .upsert(payload)
+      .then(({ error }) => {
+        if (error) console.warn('Supabase profile sync note:', error.message);
+      });
+  }, [currentUser]);
+
+  // Load cloud profile (avatar, bio, sticker packs) on startup
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client || !currentUser || !currentUser.id) return;
 
     client
       .from('profiles')
-      .upsert({
-        id: currentUser.id,
-        nickname: currentUser.nickname,
-        username: currentUser.username,
-        avatar: currentUser.avatar && currentUser.avatar.startsWith('http') ? currentUser.avatar : null,
-        status_emoji: currentUser.statusEmoji || '🔥',
-        status_text: currentUser.statusText || '',
-        bio: currentUser.bio || '',
-        is_online: true,
-        updated_at: new Date().toISOString()
-      })
-      .then(({ error }) => {
-        if (error) console.warn('Supabase profile sync note:', error.message);
+      .select('*')
+      .eq('id', currentUser.id)
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          // Sync cloud avatar if phone has default Unsplash photo
+          if (data.avatar && (!currentUser.avatar || currentUser.avatar.includes('photo-1534528741775'))) {
+            setCurrentUser((prev) => {
+              const next = { ...prev, avatar: data.avatar };
+              localStorage.setItem('just_user', JSON.stringify(next));
+              return next;
+            });
+          }
+
+          // Sync cloud sticker packs into localStorage
+          if (data.sticker_packs && Array.isArray(data.sticker_packs) && data.sticker_packs.length > 0) {
+            try {
+              localStorage.setItem('just_sticker_packs', JSON.stringify(data.sticker_packs));
+              window.dispatchEvent(new Event('just_sticker_packs_updated'));
+            } catch (e) {}
+          }
+        }
       });
-  }, [currentUser]);
+  }, [currentUser.id]);
 
   // Supabase Realtime broadcast listener
   useEffect(() => {

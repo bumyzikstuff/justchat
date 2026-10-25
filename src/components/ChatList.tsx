@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Chat, Message } from '../types';
 import { Pin, Search, Check, CheckCheck, Mic, Video, Music, Smile, Plus, Edit, Trash2, Bookmark } from 'lucide-react';
+import { AudioHelper } from '../utils/audio';
 
 interface ChatListProps {
   chats: Chat[];
@@ -26,6 +27,50 @@ export const ChatList: React.FC<ChatListProps> = ({
   onOpenCreateChat
 }) => {
   const [filter, setFilter] = useState<'all' | 'pinned' | 'groups'>('all');
+  const TABS: ('all' | 'pinned' | 'groups')[] = ['all', 'pinned', 'groups'];
+
+  // Gesture swipe navigation between tabs
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const isHorizontalSwipe = useRef(false);
+  const [swipeOffsetX, setSwipeOffsetX] = useState(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    isHorizontalSwipe.current = false;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - touchStartX.current;
+    const dy = e.touches[0].clientY - touchStartY.current;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    if (absX > 15 && absX > absY * 1.3) {
+      isHorizontalSwipe.current = true;
+      setSwipeOffsetX(dx * 0.35);
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (isHorizontalSwipe.current) {
+      const dx = e.changedTouches[0].clientX - touchStartX.current;
+      const currentIndex = TABS.indexOf(filter);
+
+      if (dx < -45 && currentIndex < TABS.length - 1) {
+        // Swipe left -> next tab
+        setFilter(TABS[currentIndex + 1]);
+        AudioHelper.playPop(520, 0.03);
+      } else if (dx > 45 && currentIndex > 0) {
+        // Swipe right -> prev tab
+        setFilter(TABS[currentIndex - 1]);
+        AudioHelper.playPop(520, 0.03);
+      }
+    }
+    setSwipeOffsetX(0);
+    isHorizontalSwipe.current = false;
+  };
 
   // Sort chats: pinned first, then by last message time / order
   const filteredChats = chats
@@ -122,8 +167,17 @@ export const ChatList: React.FC<ChatListProps> = ({
         </button>
       </div>
 
-      {/* Chat list items */}
-      <div className="flex-1 overflow-y-auto divide-y divide-[#242f3d]/20">
+      {/* Chat list items with gesture swipe support */}
+      <div 
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          transform: swipeOffsetX !== 0 ? `translateX(${swipeOffsetX}px)` : undefined,
+          transition: isHorizontalSwipe.current ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1)'
+        }}
+        className="flex-1 overflow-y-auto divide-y divide-[#242f3d]/20 transition-transform"
+      >
         {filteredChats.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none space-y-3 mt-12">
             <div className="w-16 h-16 rounded-3xl bg-[#17212b] border border-[#242f3d] flex items-center justify-center text-3xl shadow-lg">

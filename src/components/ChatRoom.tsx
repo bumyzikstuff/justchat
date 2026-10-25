@@ -3,6 +3,7 @@ import { Chat, Message, CatSticker, TrackInfo } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { ArrowLeft, Pin, MoreVertical, User, Trash2, Bell, BellOff, X, Bookmark } from 'lucide-react';
+import { AudioHelper } from '../utils/audio';
 
 interface ChatRoomProps {
   chat: Chat;
@@ -78,13 +79,70 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
   const isSavedMessages = chat.isSavedMessages || chat.id === 'chat-saved';
   const isBotChat = chat.isBot || chat.id === 'chat-bot-stickerbot';
 
+  // Swipe-back gesture handling (Edge swipe or horizontal right swipe to close chat)
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const isBackSwiping = useRef(false);
+  const [swipeBackOffset, setSwipeBackOffset] = useState(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    isBackSwiping.current = false;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - touchStartX.current;
+    const dy = e.touches[0].clientY - touchStartY.current;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    if (dx > 15 && absX > absY * 1.2) {
+      isBackSwiping.current = true;
+      setSwipeBackOffset(Math.min(dx * 0.65, 140));
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (isBackSwiping.current) {
+      const dx = e.changedTouches[0].clientX - touchStartX.current;
+      if (dx > 65) {
+        AudioHelper.playPop(340, 0.05);
+        onBack();
+      }
+    }
+    setSwipeBackOffset(0);
+    isBackSwiping.current = false;
+  };
+
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#0e1621] relative select-none">
+    <div 
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{
+        transform: swipeBackOffset > 0 ? `translateX(${swipeBackOffset}px)` : undefined,
+        transition: isBackSwiping.current ? 'none' : 'transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1)'
+      }}
+      className="flex-1 flex flex-col h-full bg-[#0e1621] relative select-none"
+    >
+      {/* Floating Swipe-Back indicator on edge */}
+      {swipeBackOffset > 20 && (
+        <div 
+          className="fixed left-3 top-1/2 -translate-y-1/2 z-50 bg-[#17212b]/95 border border-[#2AABEE] text-[#2AABEE] p-3 rounded-full shadow-2xl flex items-center justify-center transition-all backdrop-blur-md"
+          style={{
+            opacity: Math.min(swipeBackOffset / 50, 1),
+            transform: `scale(${0.8 + Math.min(swipeBackOffset / 120, 0.4)})`
+          }}
+        >
+          <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
+        </div>
+      )}
       {/* Chat Room Top Navigation Bar */}
       <div className="bg-[#17212b] border-b border-[#242f3d] px-3 py-2 flex items-center justify-between z-20 shadow-sm">
         <div className="flex items-center space-x-2.5 min-w-0">

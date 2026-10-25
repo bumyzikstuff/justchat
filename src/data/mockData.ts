@@ -1,17 +1,32 @@
-import { User, Story, Chat, Message, CatSticker } from '../types';
+import { User, Story, Chat, Message, CatSticker, StickerPack } from '../types';
 
 export const CURRENT_USER_DEFAULT: User = {
   id: 'user-me',
-  nickname: 'Булат',
+  nickname: 'Бублик',
   username: 'bulat',
-  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  statusEmoji: '👑', // VIP status badge
-  statusText: 'Создатель JustChat 👑',
+  avatar: '/avatar-bublik.jpg',
+  statusEmoji: '🎧',
+  statusText: 'Йоу йоу',
   bio: 'Основатель и главный архитектор JustChat ⚡',
   isOnline: true,
   isVip: true,
   hideLastSeen: true
 };
+
+export const DEFAULT_STICKER_PACKS: StickerPack[] = [
+  {
+    id: 'pack-nuya',
+    name: 'нуя',
+    authorId: 'user-me',
+    authorName: 'Бублик',
+    createdAt: Date.now(),
+    stickers: [
+      { id: 'stk-nuya-1', packId: 'pack-nuya', packName: 'нуя', emoji: '😏', title: 'нуя 1', url: '/stickers/nuya-1.jpg', createdAt: Date.now() },
+      { id: 'stk-nuya-2', packId: 'pack-nuya', packName: 'нуя', emoji: '😐', title: 'нуя 2', url: '/stickers/nuya-2.jpg', createdAt: Date.now() },
+      { id: 'stk-nuya-3', packId: 'pack-nuya', packName: 'нуя', emoji: '🤡', title: 'нуя 3', url: '/stickers/nuya-3.png', createdAt: Date.now() }
+    ]
+  }
+];
 
 export const AVAILABLE_EMOJIS = [
   '👑', '🐱', '🔥', '⚡', '💎', '🎧', '🚀', '🍕', 

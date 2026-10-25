@@ -1,4 +1,5 @@
 import { User, Chat, Message, StickerPack, CustomSticker } from '../types';
+import { DEFAULT_STICKER_PACKS } from '../data/mockData';
 import { getSupabaseClient } from './supabase';
 
 export const STICKER_BOT_AVATAR = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%232AABEE"/><stop offset="100%" stop-color="%238b5cf6"/></linearGradient></defs><rect width="128" height="128" rx="64" fill="url(%23bg)"/><text x="50%" y="54%" font-size="64" text-anchor="middle" dominant-baseline="middle">🤖</text></svg>`;
@@ -28,7 +29,7 @@ export const STICKER_BOT_CHAT: Chat = {
   isOnline: true,
   lastSeen: 'бот',
   lastMessage: {
-    text: 'Создайте свой набор стикеров! 🎨',
+    text: '📦 Ваши наборы стикеров (1): 1. «нуя» — 3 шт.',
     createdAt: 'Всегда',
     type: 'text',
     isOutgoing: false
@@ -48,9 +49,13 @@ const STORAGE_KEY_SESSION = 'just_stickerbot_session';
 export function getStoredStickerPacks(): StickerPack[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PACKS);
-    return raw ? JSON.parse(raw) : [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+    return DEFAULT_STICKER_PACKS;
   } catch (e) {
-    return [];
+    return DEFAULT_STICKER_PACKS;
   }
 }
 

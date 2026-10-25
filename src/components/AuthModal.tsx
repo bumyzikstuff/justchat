@@ -48,13 +48,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ validCode, onSuccess }) =>
 
     const newUser: User = {
       id: isCreator ? 'user-me' : `user-${Date.now()}`,
-      nickname: isCreator ? (nickname.trim() || 'Булат') : nickname.trim(),
+      nickname: isCreator ? (nickname.trim() || 'Бублик') : nickname.trim(),
       username: isCreator ? 'bulat' : cleanUsername,
       avatar: isCreator
-        ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+        ? '/avatar-bublik.jpg'
         : `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
-      statusEmoji: selectedEmoji,
-      statusText: isCreator ? 'Создатель JustChat 👑' : 'на связи 🤙',
+      statusEmoji: isCreator ? '🎧' : selectedEmoji,
+      statusText: isCreator ? 'Йоу йоу' : 'на связи 🤙',
       bio: isCreator ? 'Основатель и главный архитектор JustChat ⚡' : 'Пользователь JustChat',
       isOnline: true,
       isVip: isCreator,

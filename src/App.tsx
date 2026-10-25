@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Chat, Message, Story, CatSticker, TrackInfo, StoryViewer, StoryLike } from './types';
 import {
   CURRENT_USER_DEFAULT,
+  DEFAULT_STICKER_PACKS,
   INITIAL_CHATS,
   SAVED_MESSAGES_CHAT,
   INITIAL_MESSAGES,
@@ -71,6 +72,12 @@ export function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
+        // Automatically purge any stale legacy "Булат" or Unsplash girl photo
+        if (parsed.id === 'user-me' && (parsed.nickname === 'Булат' || !parsed.avatar || parsed.avatar.includes('photo-1534528741775'))) {
+          localStorage.setItem('just_user', JSON.stringify(CURRENT_USER_DEFAULT));
+          localStorage.setItem('bro_user', JSON.stringify(CURRENT_USER_DEFAULT));
+          return CURRENT_USER_DEFAULT;
+        }
         return {
           ...parsed,
           isVip: parsed.isVip !== undefined ? parsed.isVip : (parsed.id === 'user-me' || parsed.username === 'bulat' || parsed.username === 'bublik')
@@ -285,6 +292,15 @@ export function App() {
       }
       return filtered;
     });
+
+    // Ensure default «нуя» sticker pack is present
+    try {
+      const raw = localStorage.getItem('just_sticker_packs');
+      if (!raw || raw === '[]' || raw === 'null') {
+        localStorage.setItem('just_sticker_packs', JSON.stringify(DEFAULT_STICKER_PACKS));
+        window.dispatchEvent(new Event('just_sticker_packs_updated'));
+      }
+    } catch (e) {}
   }, []);
 
   // Auto-sync current user profile and custom sticker packs to global Supabase profiles table

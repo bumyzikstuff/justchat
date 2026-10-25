@@ -63,6 +63,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ validCode, onSuccess }) =>
 
     localStorage.setItem('just_user', JSON.stringify(newUser));
     localStorage.setItem('bro_user', JSON.stringify(newUser));
+    localStorage.setItem('just_invite_code', enteredCode);
     confetti({
       particleCount: 70,
       spread: 80,

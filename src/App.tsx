@@ -145,6 +145,30 @@ export function App() {
     if (!loaded.some((c: Chat) => c.id === 'chat-bot-stickerbot' || c.isBot)) {
       loaded = [...loaded, STICKER_BOT_CHAT];
     }
+    // For friends (non-creators), automatically include direct chat with Bublik creator
+    if (currentUser.id !== 'user-me') {
+      const creatorChatId = `chat-${['user-me', currentUser.id].sort().join('-')}`;
+      if (!loaded.some((c: Chat) => c.id === creatorChatId || c.name === 'Бублик')) {
+        const creatorChat: Chat = {
+          id: creatorChatId,
+          type: 'direct',
+          name: 'Бублик',
+          avatar: '/avatar-bublik.jpg',
+          statusEmoji: '🎧',
+          isPinned: true,
+          unreadCount: 0,
+          isOnline: true,
+          lastSeen: 'в сети',
+          lastMessage: {
+            text: 'Привет! Добро пожаловать в JustChat 🤙',
+            createdAt: 'Только что',
+            type: 'text',
+            isOutgoing: false
+          }
+        };
+        loaded = [creatorChat, ...loaded];
+      }
+    }
     return loaded;
   });
   const [selectedChatId, setSelectedChatId] = useState<string | null>(() => {

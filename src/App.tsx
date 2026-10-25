@@ -59,7 +59,7 @@ import {
   broadcastForceRelogin
 } from './services/supabase';
 
-export const CURRENT_AUTH_EPOCH = 'epoch_justchat_reset_2026_10_25_v3';
+export const CURRENT_AUTH_EPOCH = 'epoch_justchat_reset_2026_10_25_v4';
 
 const GUEST_PENDING_USER: User = {
   id: 'user-pending',
@@ -72,6 +72,102 @@ const GUEST_PENDING_USER: User = {
   isOnline: true
 };
 
+// Deterministic 1-on-1 direct chat ID with double underscore delimiter '__'
+export const makeDirectChatId = (userId1: string, userId2: string): string => {
+  const sorted = [userId1, userId2].sort();
+  return `chat-dm_${sorted[0]}__${sorted[1]}`;
+};
+
+// Helper to parse participants of a direct chat ID (both modern 'chat-dm_...' and legacy 'chat-...')
+export const parseDirectChatParticipants = (chatId: string): [string, string] | null => {
+  if (!chatId) return null;
+  // Modern format: chat-dm_{userA}__{userB}
+  if (chatId.startsWith('chat-dm_')) {
+    const raw = chatId.replace('chat-dm_', '');
+    const parts = raw.split('__');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      return [parts[0], parts[1]];
+    }
+  }
+  // Legacy format: chat-{userA}-{userB}
+  if (chatId.startsWith('chat-') && !chatId.startsWith('chat-saved') && chatId !== 'chat-general' && !chatId.startsWith('chat-bot-')) {
+    const raw = chatId.replace(/^chat-/, '');
+    if (raw.startsWith('user-me-')) {
+      const other = raw.replace(/^user-me-/, '');
+      if (other) return ['user-me', other];
+    } else if (raw.endsWith('-user-me')) {
+      const other = raw.replace(/-user-me$/, '');
+      if (other) return [other, 'user-me'];
+    }
+  }
+  return null;
+};
+
+// Strict check: Is this chat intended for myId? (STRICT SECURITY & ZERO CROSS-CONTAMINATION)
+export const isChatForMe = (chatId: string, myId: string): boolean => {
+  if (!chatId || !myId || myId === 'user-pending') return false;
+
+  // Personal saved messages: STRICTLY user's own!
+  if (chatId.startsWith('chat-saved')) {
+    return chatId === `chat-saved-${myId}`;
+  }
+
+  // Official Sticker Bot
+  if (chatId === 'chat-bot-stickerbot') {
+    return true;
+  }
+
+  // Public general group chat
+  if (chatId === 'chat-general') {
+    return true;
+  }
+
+  // Modern direct chat: chat-dm_{id1}__{id2}
+  if (chatId.startsWith('chat-dm_')) {
+    const raw = chatId.replace('chat-dm_', '');
+    const parts = raw.split('__');
+    return parts.includes(myId);
+  }
+
+  // Legacy direct chat
+  const participants = parseDirectChatParticipants(chatId);
+  if (participants) {
+    return participants.includes(myId);
+  }
+
+  // Direct ID check: if chatId contains myId and is a private chat
+  if (chatId.startsWith('chat-') && chatId.includes(myId)) {
+    return true;
+  }
+
+  // STRICT SECURITY DEFAULT: DO NOT LEAK ANY CHAT NOT ADDRESSED TO ME!
+  return false;
+};
+
+// Helper to extract the other participant's user ID in a direct chat
+export const getChatPartnerId = (chat: Chat, myId: string): string | null => {
+  if (chat.type !== 'direct' || chat.isSavedMessages || chat.id.startsWith('chat-saved') || chat.isBot) {
+    return null;
+  }
+  if (chat.partnerId && chat.partnerId !== myId) return chat.partnerId;
+
+  if (chat.id.startsWith('chat-dm_')) {
+    const raw = chat.id.replace('chat-dm_', '');
+    const parts = raw.split('__');
+    if (parts.length === 2) {
+      return parts[0] === myId ? parts[1] : parts[0];
+    }
+  }
+
+  const participants = parseDirectChatParticipants(chat.id);
+  if (participants) {
+    return participants[0] === myId ? participants[1] : participants[0];
+  }
+
+  if (chat.partnerId) return chat.partnerId;
+  return null;
+};
+
 export function App() {
   // Global Session Purge: If stored epoch doesn't match, force logout everyone immediately!
   if (typeof window !== 'undefined') {
@@ -80,6 +176,8 @@ export function App() {
       localStorage.removeItem('just_user');
       localStorage.removeItem('bro_user');
       localStorage.removeItem('just_chats');
+      localStorage.removeItem('just_messages');
+      localStorage.removeItem('just_friends');
       localStorage.setItem('just_auth_epoch', CURRENT_AUTH_EPOCH);
     }
   }
@@ -135,13 +233,20 @@ export function App() {
     return GUEST_PENDING_USER;
   });
 
-  // Friends & Contacts state (persisted)
+  // Friends & Contacts state (SCOPED TO CURRENT USER)
   const [friends, setFriends] = useState<User[]>(() => {
-    const saved = localStorage.getItem('just_friends');
+    if (!currentUser.id || currentUser.id === 'user-pending') return [];
+    const userFriendsKey = `just_friends_${currentUser.id}`;
+    let saved = localStorage.getItem(userFriendsKey);
+    if (!saved && currentUser.id === 'user-me') {
+      saved = localStorage.getItem('just_friends');
+      if (saved) localStorage.removeItem('just_friends');
+    }
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         return parsed.filter((f: User) => 
+          f.id !== currentUser.id &&
           !['max_fit', 'artem_beats', 'dasha_meow', 'nikita_pro'].includes(f.username) &&
           !f.username.toLowerCase().includes('stickerbotв') &&
           !f.id.includes('stickerbotв') &&
@@ -176,19 +281,35 @@ export function App() {
     return !localStorage.getItem('just_user') && !localStorage.getItem('bro_user');
   });
 
-  // Chats state (persisted)
+  // Chats state (SCOPED TO CURRENT USER, STRICTLY FILTERED)
   const [chats, setChats] = useState<Chat[]>(() => {
-    const saved = localStorage.getItem('just_chats');
-    let loaded: Chat[] = saved ? JSON.parse(saved) : INITIAL_CHATS;
+    if (!currentUser.id || currentUser.id === 'user-pending') return [];
+    const userChatsKey = `just_chats_${currentUser.id}`;
+    let saved = localStorage.getItem(userChatsKey);
+    if (!saved && currentUser.id === 'user-me') {
+      saved = localStorage.getItem('just_chats');
+      if (saved) localStorage.removeItem('just_chats');
+    }
+    let loaded: Chat[] = saved ? JSON.parse(saved) : [];
+    // Strict isolation filter: never keep foreign chats
+    loaded = loaded.filter(c => isChatForMe(c.id, currentUser.id));
     loaded = loaded.filter(c => 
       !c.name.toLowerCase().includes('stickerbotв') && 
       !c.id.includes('stickerbotв') &&
       !(c.name.toLowerCase().includes('stickerbot') && c.id !== 'chat-bot-stickerbot')
     );
-    const userSavedId = `chat-saved-${currentUser.id || 'user-me'}`;
+
+    const userSavedId = `chat-saved-${currentUser.id}`;
     const userSavedChat: Chat = {
       ...SAVED_MESSAGES_CHAT,
-      id: userSavedId
+      id: userSavedId,
+      unreadCount: 0,
+      lastMessage: {
+        text: 'Личное хранилище заметок, кружочков и файлов 🔖',
+        createdAt: 'Всегда',
+        type: 'text',
+        isOutgoing: true
+      }
     };
     loaded = loaded.filter(c => !c.id.startsWith('chat-saved') && !c.isSavedMessages);
     loaded = [userSavedChat, ...loaded];
@@ -196,10 +317,12 @@ export function App() {
     if (!loaded.some((c: Chat) => c.id === 'chat-bot-stickerbot' || c.isBot)) {
       loaded = [...loaded, STICKER_BOT_CHAT];
     }
+
     // For friends (non-creators), automatically include direct chat with Bublik creator
-    if (currentUser.id !== 'user-me' && currentUser.id !== 'user-pending') {
-      const creatorChatId = `chat-${['user-me', currentUser.id].sort().join('-')}`;
-      if (!loaded.some((c: Chat) => c.id === creatorChatId || c.name === 'Бублик')) {
+    if (currentUser.id !== 'user-me') {
+      const creatorChatId = makeDirectChatId('user-me', currentUser.id);
+      const legacyCreatorChatId = `chat-${['user-me', currentUser.id].sort().join('-')}`;
+      if (!loaded.some((c: Chat) => c.id === creatorChatId || c.id === legacyCreatorChatId || c.partnerId === 'user-me' || c.name === 'Бублик')) {
         const creatorChat: Chat = {
           id: creatorChatId,
           type: 'direct',
@@ -223,49 +346,84 @@ export function App() {
     }
     return loaded;
   });
+
   const [selectedChatId, setSelectedChatId] = useState<string | null>(() => {
     const userSavedId = `chat-saved-${currentUser.id || 'user-me'}`;
-    const saved = localStorage.getItem('just_chats');
+    if (!currentUser.id || currentUser.id === 'user-pending') return userSavedId;
+    const userChatsKey = `just_chats_${currentUser.id}`;
+    const saved = localStorage.getItem(userChatsKey);
     const parsed: Chat[] = saved ? JSON.parse(saved) : [];
-    if (parsed.length > 0) return parsed[0].id;
+    if (parsed.length > 0 && isChatForMe(parsed[0].id, currentUser.id)) return parsed[0].id;
     return userSavedId;
   });
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Messages state (persisted)
+  // Messages state (SCOPED TO CURRENT USER, STRICTLY FILTERED)
   const [messages, setMessages] = useState<Record<string, Message[]>>(() => {
     try {
-      const saved = localStorage.getItem('just_messages');
-      const parsed = saved ? JSON.parse(saved) : INITIAL_MESSAGES;
       const userSavedId = `chat-saved-${currentUser.id || 'user-me'}`;
-      if (!parsed[userSavedId]) {
-        parsed[userSavedId] = parsed['chat-saved'] || INITIAL_MESSAGES['chat-saved'] || [];
+      const defaultSavedWelcome: Message = {
+        id: `saved-msg-welcome-${currentUser.id || 'me'}`,
+        chatId: userSavedId,
+        senderId: currentUser.id || 'user-me',
+        senderName: 'Избранное',
+        type: 'text',
+        text: 'Добро пожаловать в ваше личное «Избранное»! 🔖\n\nЗдесь вы можете:\n• Записывать мысли и заметки\n• Отправлять себе ссылки и файлы\n• Сохранять любимые кружочки и треки',
+        createdAt: 'Только что',
+        isOutgoing: true,
+        status: 'read'
+      };
+
+      const stickerBotWelcome: Message = {
+        id: 'msg-bot-welcome',
+        chatId: 'chat-bot-stickerbot',
+        senderId: STICKER_BOT_USER.id,
+        senderName: STICKER_BOT_USER.nickname,
+        senderEmoji: STICKER_BOT_USER.statusEmoji,
+        senderAvatar: STICKER_BOT_USER.avatar,
+        type: 'text',
+        text: 'Привет! Я официальный бот для создания стикеров в JustChat 🤖🎨\n\nЯ помогу вам превратить любые картинки и мемы в стикеры для чатов.\n\nКоманды:\n/newpack — создать новый набор стикеров\n/mypacks — список ваших наборов\n/help — помощь',
+        createdAt: 'Только что',
+        isOutgoing: false,
+        status: 'read',
+        botButtons: [
+          { label: '➕ Создать новый набор (/newpack)', action: '/newpack' },
+          { label: '📦 Мои стикеры (/mypacks)', action: '/mypacks' }
+        ]
+      };
+
+      if (!currentUser.id || currentUser.id === 'user-pending') {
+        return {
+          [userSavedId]: [defaultSavedWelcome],
+          'chat-bot-stickerbot': [stickerBotWelcome]
+        };
       }
-      if (!parsed['chat-bot-stickerbot']) {
-        parsed['chat-bot-stickerbot'] = [
-          {
-            id: 'msg-bot-welcome',
-            chatId: 'chat-bot-stickerbot',
-            senderId: STICKER_BOT_USER.id,
-            senderName: STICKER_BOT_USER.nickname,
-            senderEmoji: STICKER_BOT_USER.statusEmoji,
-            senderAvatar: STICKER_BOT_USER.avatar,
-            type: 'text',
-            text: 'Привет! Я официальный бот для создания стикеров в JustChat 🤖🎨\n\nЯ помогу вам превратить любые картинки и мемы в стикеры для чатов.\n\nКоманды:\n/newpack — создать новый набор стикеров\n/mypacks — список ваших наборов\n/help — помощь',
-            createdAt: 'Только что',
-            isOutgoing: false,
-            status: 'read',
-            botButtons: [
-              { label: '➕ Создать новый набор (/newpack)', action: '/newpack' },
-              { label: '📦 Мои стикеры (/mypacks)', action: '/mypacks' }
-            ]
-          }
-        ];
+
+      const userMsgsKey = `just_messages_${currentUser.id}`;
+      let saved = localStorage.getItem(userMsgsKey);
+      if (!saved && currentUser.id === 'user-me') {
+        saved = localStorage.getItem('just_messages');
+        if (saved) localStorage.removeItem('just_messages');
       }
-      return parsed;
+
+      const parsed: Record<string, Message[]> = saved ? JSON.parse(saved) : {};
+      const sanitized: Record<string, Message[]> = {};
+      for (const [cId, msgs] of Object.entries(parsed)) {
+        if (isChatForMe(cId, currentUser.id)) {
+          sanitized[cId] = msgs;
+        }
+      }
+
+      if (!sanitized[userSavedId] || sanitized[userSavedId].length === 0) {
+        sanitized[userSavedId] = [defaultSavedWelcome];
+      }
+      if (!sanitized['chat-bot-stickerbot']) {
+        sanitized['chat-bot-stickerbot'] = [stickerBotWelcome];
+      }
+      return sanitized;
     } catch (e) {
-      console.warn('Error reading just_messages from localStorage, resetting:', e);
-      return INITIAL_MESSAGES;
+      console.warn('Error reading scoped just_messages, resetting:', e);
+      return {};
     }
   });
 
@@ -290,45 +448,6 @@ export function App() {
   // Live Presence & Cloud Profiles state
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
   const [cloudProfiles, setCloudProfiles] = useState<any[]>([]);
-
-  // Helper to extract the other participant's user ID in a direct chat
-  const getChatPartnerId = (chat: Chat, myId: string): string | null => {
-    if (chat.type !== 'direct' || chat.isSavedMessages || chat.id === 'chat-saved' || chat.isBot) {
-      return null;
-    }
-    if (chat.partnerId) return chat.partnerId;
-    if (chat.id.startsWith('chat-')) {
-      const parts = chat.id.replace('chat-', '').split('-');
-      if (parts.length === 2) {
-        return parts[0] === myId ? parts[1] : parts[0];
-      }
-    }
-    const matchedFriend = friends.find((f) => f.nickname === chat.name || f.username === chat.name);
-    if (matchedFriend) return matchedFriend.id;
-    return null;
-  };
-
-  // Verify whether a message/action is intended for the current user (STRICT ISOLATION)
-  const isChatForMe = (chatId: string, myId: string): boolean => {
-    if (!chatId || !myId) return false;
-    // Personal saved messages: strictly user's own!
-    if (chatId.startsWith('chat-saved')) {
-      return chatId === `chat-saved-${myId}`;
-    }
-    // Public general chat or official sticker bot
-    if (chatId === 'chat-general' || chatId === 'chat-bot-stickerbot') {
-      return true;
-    }
-    // Direct 1-on-1 chats: format is "chat-{id1}-{id2}"
-    if (chatId.startsWith('chat-')) {
-      const raw = chatId.replace(/^chat-/, '');
-      const parts = raw.split('-');
-      if (parts.length === 2) {
-        return parts[0] === myId || parts[1] === myId;
-      }
-    }
-    return true;
-  };
 
   // Heartbeat & Online Presence lifecycle
   useEffect(() => {
@@ -427,33 +546,45 @@ export function App() {
     );
   }, [onlineUserIds, cloudProfiles, currentUser.id]);
 
-  // Sync to localStorage safely
+  // Sync to scoped localStorage safely
   useEffect(() => {
+    if (!currentUser.id || currentUser.id === 'user-pending') return;
     try {
-      localStorage.setItem('just_friends', JSON.stringify(friends));
+      localStorage.setItem(`just_friends_${currentUser.id}`, JSON.stringify(friends));
     } catch (e) {}
-  }, [friends]);
+  }, [friends, currentUser.id]);
 
   useEffect(() => {
+    if (!currentUser.id || currentUser.id === 'user-pending') return;
     try {
-      localStorage.setItem('just_chats', JSON.stringify(chats));
+      const sanitized = chats.filter((c) => isChatForMe(c.id, currentUser.id));
+      localStorage.setItem(`just_chats_${currentUser.id}`, JSON.stringify(sanitized));
     } catch (e) {}
-  }, [chats]);
+  }, [chats, currentUser.id]);
 
   useEffect(() => {
+    if (!currentUser.id || currentUser.id === 'user-pending') return;
     try {
-      localStorage.setItem('just_messages', JSON.stringify(messages));
+      const sanitized: Record<string, Message[]> = {};
+      for (const [cId, msgs] of Object.entries(messages)) {
+        if (isChatForMe(cId, currentUser.id)) {
+          sanitized[cId] = msgs;
+        }
+      }
+      localStorage.setItem(`just_messages_${currentUser.id}`, JSON.stringify(sanitized));
     } catch (e) {
       console.warn('LocalStorage quota exceeded for messages, retaining recent messages:', e);
       try {
         const trimmed: Record<string, Message[]> = {};
-        for (const [cId, msgList] of Object.entries(messages)) {
-          trimmed[cId] = msgList.slice(-50);
+        for (const [cId, msgs] of Object.entries(messages)) {
+          if (isChatForMe(cId, currentUser.id)) {
+            trimmed[cId] = msgs.slice(-50);
+          }
         }
-        localStorage.setItem('just_messages', JSON.stringify(trimmed));
+        localStorage.setItem(`just_messages_${currentUser.id}`, JSON.stringify(trimmed));
       } catch (inner) {}
     }
-  }, [messages]);
+  }, [messages, currentUser.id]);
 
   useEffect(() => {
     try {
@@ -500,9 +631,9 @@ export function App() {
         !f.id.includes('stickerbotв') &&
         !(f.username.toLowerCase().includes('stickerbot') && f.id !== 'user-stickerbot')
       );
-      if (filtered.length !== prev.length) {
+      if (filtered.length !== prev.length && currentUser.id && currentUser.id !== 'user-pending') {
         try {
-          localStorage.setItem('just_friends', JSON.stringify(filtered));
+          localStorage.setItem(`just_friends_${currentUser.id}`, JSON.stringify(filtered));
         } catch (e) {}
       }
       return filtered;
@@ -510,13 +641,14 @@ export function App() {
 
     setChats((prev) => {
       const filtered = prev.filter((c) => 
+        isChatForMe(c.id, currentUser.id) &&
         !c.name.toLowerCase().includes('stickerbotв') && 
         !c.id.includes('stickerbotв') &&
         !(c.name.toLowerCase().includes('stickerbot') && c.id !== 'chat-bot-stickerbot')
       );
-      if (filtered.length !== prev.length) {
+      if (filtered.length !== prev.length && currentUser.id && currentUser.id !== 'user-pending') {
         try {
-          localStorage.setItem('just_chats', JSON.stringify(filtered));
+          localStorage.setItem(`just_chats_${currentUser.id}`, JSON.stringify(filtered));
         } catch (e) {}
       }
       return filtered;
@@ -701,19 +833,23 @@ export function App() {
 
   // Supabase Realtime broadcast & presence listener
   useEffect(() => {
-    // Send force relogin broadcast so any active open tabs on other devices purge their sessions
-    broadcastForceRelogin(CURRENT_AUTH_EPOCH);
-
     const unsubscribe = subscribeToJustChat({
       onPresenceSync: (onlineKeys) => {
         setOnlineUserIds(new Set(onlineKeys));
       },
       onForceRelogin: ({ epoch }) => {
-        if (epoch === CURRENT_AUTH_EPOCH) {
+        if (epoch && epoch !== localStorage.getItem('just_auth_epoch')) {
           localStorage.removeItem('just_user');
           localStorage.removeItem('bro_user');
           localStorage.removeItem('just_chats');
+          localStorage.removeItem('just_messages');
+          localStorage.removeItem('just_friends');
+          localStorage.setItem('just_auth_epoch', epoch);
           setCurrentUser(GUEST_PENDING_USER);
+          setChats([]);
+          setMessages({});
+          setFriends([]);
+          setSelectedChatId(null);
           setIsAuthOpen(true);
         }
       },
@@ -739,6 +875,7 @@ export function App() {
               statusEmoji: msg.senderEmoji,
               isPinned: false,
               unreadCount: 1,
+              partnerId: msg.senderId,
               lastMessage: {
                 text: decryptedText || (msg.type === 'video' ? '🎬 Видео' : msg.type === 'image' ? '📷 Фото' : msg.type === 'voice' ? '🎙 Голосовое' : 'Сообщение'),
                 createdAt: msg.createdAt,
@@ -1709,6 +1846,10 @@ export function App() {
     localStorage.removeItem('just_user');
     localStorage.removeItem('bro_user');
     setCurrentUser(GUEST_PENDING_USER);
+    setChats([]);
+    setMessages({});
+    setFriends([]);
+    setSelectedChatId(null);
     setIsAuthOpen(true);
   };
 
@@ -1777,8 +1918,14 @@ export function App() {
     });
 
     // Use deterministic direct chat ID so both users always meet in the exact same room
-    const directChatId = `chat-${[currentUser.id, friend.id].sort().join('-')}`;
-    const existing = chats.find(c => c.id === directChatId || c.id === `chat-${friend.id}` || (c.name === friend.nickname && c.type === 'direct'));
+    const directChatId = makeDirectChatId(currentUser.id, friend.id);
+    const legacyDirectChatId = `chat-${[currentUser.id, friend.id].sort().join('-')}`;
+    const existing = chats.find(c => 
+      c.id === directChatId || 
+      c.id === legacyDirectChatId || 
+      c.partnerId === friend.id || 
+      (c.name === friend.nickname && c.type === 'direct')
+    );
     if (existing) {
       setSelectedChatId(existing.id);
       markChatAsRead(existing.id);
@@ -2114,15 +2261,135 @@ export function App() {
           onSuccess={(user) => {
             setCurrentUser(user);
             setIsAuthOpen(false);
+
+            // Re-initialize chats for this user from their scoped storage or defaults
+            const userChatsKey = `just_chats_${user.id}`;
+            const userMsgsKey = `just_messages_${user.id}`;
+            const userFriendsKey = `just_friends_${user.id}`;
+
             const userSavedId = `chat-saved-${user.id}`;
-            setChats((prev) => {
-              const newSaved: Chat = {
-                ...SAVED_MESSAGES_CHAT,
-                id: userSavedId
-              };
-              return [newSaved, ...prev.filter((c) => !c.id.startsWith('chat-saved') && !c.isSavedMessages)];
-            });
+            const userSavedChat: Chat = {
+              ...SAVED_MESSAGES_CHAT,
+              id: userSavedId,
+              unreadCount: 0,
+              lastMessage: {
+                text: 'Личное хранилище заметок, кружочков и файлов 🔖',
+                createdAt: 'Всегда',
+                type: 'text',
+                isOutgoing: true
+              }
+            };
+
+            const savedChatsRaw = localStorage.getItem(userChatsKey);
+            let userChats: Chat[] = [];
+            if (savedChatsRaw) {
+              try {
+                userChats = JSON.parse(savedChatsRaw);
+                userChats = userChats.filter(c => isChatForMe(c.id, user.id));
+              } catch (e) {
+                userChats = [];
+              }
+            }
+
+            userChats = userChats.filter(c => !c.id.startsWith('chat-saved') && !c.isSavedMessages);
+            userChats = [userSavedChat, ...userChats];
+
+            if (!userChats.some(c => c.id === 'chat-bot-stickerbot' || c.isBot)) {
+              userChats.push(STICKER_BOT_CHAT);
+            }
+
+            if (user.id !== 'user-me') {
+              const dmWithCreator = makeDirectChatId('user-me', user.id);
+              const legacyDm = `chat-${['user-me', user.id].sort().join('-')}`;
+              if (!userChats.some(c => c.id === dmWithCreator || c.id === legacyDm || c.partnerId === 'user-me' || c.name === 'Бублик')) {
+                const creatorChat: Chat = {
+                  id: dmWithCreator,
+                  type: 'direct',
+                  name: 'Бублик',
+                  avatar: '/avatar-bublik.jpg',
+                  statusEmoji: '🎧',
+                  isPinned: true,
+                  unreadCount: 0,
+                  partnerId: 'user-me',
+                  isOnline: false,
+                  lastSeen: 'был(а) недавно',
+                  lastMessage: {
+                    text: 'Привет! Добро пожаловать в JustChat 🤙',
+                    createdAt: 'Только что',
+                    type: 'text',
+                    isOutgoing: false
+                  }
+                };
+                userChats.push(creatorChat);
+              }
+            }
+
+            setChats(userChats);
             setSelectedChatId(userSavedId);
+
+            // Re-initialize messages for this user from scoped storage
+            const savedMsgsRaw = localStorage.getItem(userMsgsKey);
+            let userMsgs: Record<string, Message[]> = {};
+            if (savedMsgsRaw) {
+              try {
+                const parsed = JSON.parse(savedMsgsRaw);
+                for (const [cId, msgs] of Object.entries(parsed)) {
+                  if (isChatForMe(cId, user.id)) {
+                    userMsgs[cId] = msgs as Message[];
+                  }
+                }
+              } catch (e) {}
+            }
+
+            if (!userMsgs[userSavedId] || userMsgs[userSavedId].length === 0) {
+              userMsgs[userSavedId] = [
+                {
+                  id: `saved-msg-welcome-${user.id}`,
+                  chatId: userSavedId,
+                  senderId: user.id,
+                  senderName: 'Избранное',
+                  type: 'text',
+                  text: 'Добро пожаловать в ваше личное «Избранное»! 🔖\n\nЗдесь вы можете:\n• Записывать мысли и заметки\n• Отправлять себе ссылки и файлы\n• Сохранять любимые кружочки и треки',
+                  createdAt: 'Только что',
+                  isOutgoing: true,
+                  status: 'read'
+                }
+              ];
+            }
+
+            if (!userMsgs['chat-bot-stickerbot']) {
+              userMsgs['chat-bot-stickerbot'] = [
+                {
+                  id: 'msg-bot-welcome',
+                  chatId: 'chat-bot-stickerbot',
+                  senderId: STICKER_BOT_USER.id,
+                  senderName: STICKER_BOT_USER.nickname,
+                  senderEmoji: STICKER_BOT_USER.statusEmoji,
+                  senderAvatar: STICKER_BOT_USER.avatar,
+                  type: 'text',
+                  text: 'Привет! Я официальный бот для создания стикеров в JustChat 🤖🎨\n\nЯ помогу вам превратить любые картинки и мемы в стикеры для чатов.\n\nКоманды:\n/newpack — создать новый набор стикеров\n/mypacks — список ваших наборов\n/help — помощь',
+                  createdAt: 'Только что',
+                  isOutgoing: false,
+                  status: 'read',
+                  botButtons: [
+                    { label: '➕ Создать новый набор (/newpack)', action: '/newpack' },
+                    { label: '📦 Мои стикеры (/mypacks)', action: '/mypacks' }
+                  ]
+                }
+              ];
+            }
+
+            setMessages(userMsgs);
+
+            // Re-initialize friends from scoped storage
+            const savedFriendsRaw = localStorage.getItem(userFriendsKey);
+            let userFriends: User[] = [];
+            if (savedFriendsRaw) {
+              try {
+                userFriends = JSON.parse(savedFriendsRaw);
+              } catch (e) {}
+            }
+            setFriends(userFriends);
           }}
         />
       )}

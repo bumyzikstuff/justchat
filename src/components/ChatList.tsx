@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Chat } from '../types';
+import { Chat, Message } from '../types';
 import { Pin, Search, Check, CheckCheck, Mic, Video, Music, Smile, Plus, Edit, Trash2, Bookmark } from 'lucide-react';
 
 interface ChatListProps {
   chats: Chat[];
+  messages?: Record<string, Message[]>;
   selectedChatId: string | null;
   onSelectChat: (chat: Chat) => void;
   onTogglePin: (chatId: string) => void;
@@ -15,6 +16,7 @@ interface ChatListProps {
 
 export const ChatList: React.FC<ChatListProps> = ({
   chats,
+  messages,
   selectedChatId,
   onSelectChat,
   onTogglePin,
@@ -178,63 +180,79 @@ export const ChatList: React.FC<ChatListProps> = ({
                 </div>
 
                 {/* Info & Last message */}
-                <div className="flex-1 min-w-0 pr-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center space-x-1.5 truncate">
-                      <h3 className="font-semibold text-sm text-gray-100 group-hover:text-[#2AABEE] transition truncate">
-                        {chat.name}
-                      </h3>
-                      {chat.isBot && (
-                        <span className="text-[9px] bg-sky-500/20 text-sky-400 border border-sky-400/40 px-1.5 py-0.2 rounded-full font-bold font-mono">
-                          БОТ
+                {(() => {
+                  const chatMsgs = messages ? messages[chat.id] : undefined;
+                  const lastMsg = chatMsgs !== undefined
+                    ? (chatMsgs.length > 0 ? chatMsgs[chatMsgs.length - 1] : undefined)
+                    : chat.lastMessage;
+
+                  const previewText = lastMsg
+                    ? (lastMsg.text || (lastMsg.type === 'video' ? '🎬 Видео' : lastMsg.type === 'image' ? '📷 Фото' : lastMsg.type === 'voice' ? '🎙 Голосовое' : lastMsg.type === 'video_note' ? '📹 Кружочек' : lastMsg.type === 'sticker' ? 'Стикер 🎨' : 'Сообщение'))
+                    : (chat.lastMessage?.text || 'Нет сообщений');
+                  const previewTime = lastMsg ? lastMsg.createdAt : (chat.lastMessage?.createdAt || '');
+                  const previewType = lastMsg ? lastMsg.type : chat.lastMessage?.type;
+                  const isOutgoing = lastMsg ? lastMsg.isOutgoing : chat.lastMessage?.isOutgoing;
+
+                  return (
+                    <div className="flex-1 min-w-0 pr-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center space-x-1.5 truncate">
+                          <h3 className="font-semibold text-sm text-gray-100 group-hover:text-[#2AABEE] transition truncate">
+                            {chat.name}
+                          </h3>
+                          {chat.isBot && (
+                            <span className="text-[9px] bg-sky-500/20 text-sky-400 border border-sky-400/40 px-1.5 py-0.2 rounded-full font-bold font-mono">
+                              БОТ
+                            </span>
+                          )}
+                          {chat.statusEmoji && !chat.isBot && (
+                            <span className="text-xs" title="Эмодзи-статус">
+                              {chat.statusEmoji}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-gray-400 flex-shrink-0 ml-1">
+                          {previewTime}
                         </span>
-                      )}
-                      {chat.statusEmoji && !chat.isBot && (
-                        <span className="text-xs" title="Эмодзи-статус">
-                          {chat.statusEmoji}
-                        </span>
-                      )}
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-gray-400 truncate flex items-center mr-2">
+                          {isOutgoing && (
+                            <CheckCheck className="w-3.5 h-3.5 text-[#2AABEE] inline mr-1 flex-shrink-0" />
+                          )}
+                          {getMessagePreviewIcon(previewType)}
+                          <span className="truncate">
+                            {previewText}
+                          </span>
+                        </p>
+
+                        <div className="flex items-center space-x-1.5 flex-shrink-0">
+                          {/* Pinned Icon */}
+                          {chat.isPinned && (
+                            <span 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTogglePin(chat.id);
+                              }}
+                              title="Закреплено (клик чтобы открепить)"
+                              className="text-[#2AABEE] p-0.5 rounded hover:bg-white/10 transition"
+                            >
+                              <Pin className="w-3.5 h-3.5 fill-current rotate-45" />
+                            </span>
+                          )}
+
+                          {/* Unread badge */}
+                          {chat.unreadCount > 0 && (
+                            <span className="bg-[#2AABEE] text-white text-[11px] font-bold px-2 py-0.5 rounded-full shadow min-w-[20px] text-center">
+                              {chat.unreadCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <span className="text-[11px] text-gray-400 flex-shrink-0 ml-1">
-                      {chat.lastMessage?.createdAt || ''}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-400 truncate flex items-center mr-2">
-                      {chat.lastMessage?.isOutgoing && (
-                        <CheckCheck className="w-3.5 h-3.5 text-[#2AABEE] inline mr-1 flex-shrink-0" />
-                      )}
-                      {getMessagePreviewIcon(chat.lastMessage?.type)}
-                      <span className="truncate">
-                        {chat.lastMessage?.text || 'Нет сообщений'}
-                      </span>
-                    </p>
-
-                    <div className="flex items-center space-x-1.5 flex-shrink-0">
-                      {/* Pinned Icon */}
-                      {chat.isPinned && (
-                        <span 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTogglePin(chat.id);
-                          }}
-                          title="Закреплено (клик чтобы открепить)"
-                          className="text-[#2AABEE] p-0.5 rounded hover:bg-white/10 transition"
-                        >
-                          <Pin className="w-3.5 h-3.5 fill-current rotate-45" />
-                        </span>
-                      )}
-
-                      {/* Unread badge */}
-                      {chat.unreadCount > 0 && (
-                        <span className="bg-[#2AABEE] text-white text-[11px] font-bold px-2 py-0.5 rounded-full shadow min-w-[20px] text-center">
-                          {chat.unreadCount}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Quick actions on Hover (Desktop) */}
                 <div className="absolute right-2 top-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition z-10">

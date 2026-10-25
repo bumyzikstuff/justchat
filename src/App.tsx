@@ -539,14 +539,33 @@ export function App() {
         }));
       },
       onDeleteMessage: ({ chatId, messageId }) => {
+        let remainingLast: Message | undefined;
         setMessages((prev) => {
           const chatMsgs = prev[chatId] || [];
           const filtered = chatMsgs.filter((m) => m.id !== messageId);
+          remainingLast = filtered.length > 0 ? filtered[filtered.length - 1] : undefined;
           return {
             ...prev,
             [chatId]: filtered
           };
         });
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  lastMessage: remainingLast
+                    ? {
+                        text: remainingLast.text || (remainingLast.type === 'video' ? '🎬 Видео' : remainingLast.type === 'image' ? '📷 Фото' : remainingLast.type === 'voice' ? '🎙 Голосовое' : remainingLast.type === 'video_note' ? '📹 Кружочек' : remainingLast.type === 'sticker' ? 'Стикер 🎨' : 'Сообщение'),
+                        createdAt: remainingLast.createdAt,
+                        type: remainingLast.type,
+                        isOutgoing: remainingLast.isOutgoing
+                      }
+                    : undefined
+                }
+              : c
+          )
+        );
       },
       onEditMessage: async ({ chatId, messageId, text }) => {
         const decryptedText = await decryptText(text, inviteCode);
@@ -1383,34 +1402,35 @@ export function App() {
     if (!selectedChatId) return;
     AudioHelper.playPop(340, 0.06);
 
+    let updatedLast: Message | undefined;
+
     setMessages((prev) => {
       const chatMsgs = prev[selectedChatId] || [];
       const filtered = chatMsgs.filter((m) => m.id !== messageId);
-      const last = filtered.length > 0 ? filtered[filtered.length - 1] : undefined;
-
-      setChats((cList) =>
-        cList.map((c) =>
-          c.id === selectedChatId
-            ? {
-                ...c,
-                lastMessage: last
-                  ? {
-                      text: last.text || (last.type === 'video' ? '🎬 Видео' : last.type === 'image' ? '📷 Фото' : last.type === 'voice' ? '🎙 Голосовое' : 'Сообщение'),
-                      createdAt: last.createdAt,
-                      type: last.type,
-                      isOutgoing: last.isOutgoing
-                    }
-                  : undefined
-              }
-            : c
-        )
-      );
-
+      updatedLast = filtered.length > 0 ? filtered[filtered.length - 1] : undefined;
       return {
         ...prev,
         [selectedChatId]: filtered
       };
     });
+
+    setChats((cList) =>
+      cList.map((c) =>
+        c.id === selectedChatId
+          ? {
+              ...c,
+              lastMessage: updatedLast
+                ? {
+                    text: updatedLast.text || (updatedLast.type === 'video' ? '🎬 Видео' : updatedLast.type === 'image' ? '📷 Фото' : updatedLast.type === 'voice' ? '🎙 Голосовое' : updatedLast.type === 'video_note' ? '📹 Кружочек' : updatedLast.type === 'sticker' ? 'Стикер 🎨' : 'Сообщение'),
+                    createdAt: updatedLast.createdAt,
+                    type: updatedLast.type,
+                    isOutgoing: updatedLast.isOutgoing
+                  }
+                : undefined
+            }
+          : c
+      )
+    );
 
     if (editingMessage?.id === messageId) {
       setEditingMessage(null);
@@ -1551,6 +1571,7 @@ export function App() {
         {/* Chat List with Pin & Delete Feature */}
         <ChatList
           chats={chats}
+          messages={messages}
           selectedChatId={selectedChatId}
           onSelectChat={handleSelectChat}
           onTogglePin={handleTogglePin}

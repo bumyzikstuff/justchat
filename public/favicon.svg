@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#131e2b" />
+      <stop offset="100%" stop-color="#090f17" />
+    </linearGradient>
+
+    <!-- Main Electric Brand Gradient -->
+    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="45%" stop-color="#2AABEE" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+
+    <!-- Glow Gradient -->
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0.3" />
+    </linearGradient>
+
+    <!-- Drop Shadow -->
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#2AABEE" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base for App Icon -->
+  <rect width="512" height="512" rx="124" fill="url(#bgGrad)" />
+  <rect width="510" height="510" x="1" y="1" rx="123" stroke="url(#glowGrad)" stroke-width="2" />
+
+  <!-- Main Speech Bubble Shape -->
+  <path
+    d="M136 238C136 166.2 189.7 108 256 108C322.3 108 376 166.2 376 238C376 309.8 322.3 368 256 368C234.5 368 214.2 362 196.2 351.4L136 374L154.6 319.2C143 295.6 136 268 136 238Z"
+    fill="url(#brandGrad)"
+    filter="url(#shadow)"
+  />
+
+  <!-- Stylized J (Just) curve -->
+  <path
+    d="M244 186V254C244 273.882 227.882 290 208 290C199 290 190.8 286.7 184.5 281.2"
+    stroke="white"
+    stroke-width="22"
+    stroke-linecap="round"
+  />
+
+  <!-- Electric core dots -->
+  <circle cx="298" cy="206" r="16" fill="white" />
+  <circle cx="298" cy="206" r="7" fill="#2AABEE" />
+  <circle cx="298" cy="262" r="11" fill="white" opacity="0.9" />
+</svg>

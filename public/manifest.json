@@ -1,0 +1,23 @@
+{
+  "name": "JustChat — Мессенджер для друзей",
+  "short_name": "JustChat",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e1621",
+  "theme_color": "#0e1621",
+  "description": "Приватный мессенджер с E2EE шифрованием, кружками, голосовыми, треками и историями",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1363,6 +1363,40 @@ export function App() {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, lastMessage: undefined } : c));
   };
 
+  // Pull-to-refresh handler (syncs cloud profiles, stickers & status)
+  const handlePullRefresh = async () => {
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    try {
+      const { data } = await client
+        .from('profiles')
+        .select('*')
+        .eq('id', currentUser.id)
+        .single();
+      if (data) {
+        if (data.nickname && data.avatar) {
+          const updatedUser: User = {
+            ...currentUser,
+            nickname: data.nickname,
+            avatar: data.avatar,
+            statusEmoji: data.status_emoji || currentUser.statusEmoji,
+            statusText: data.status_text || currentUser.statusText,
+            bio: data.bio || currentUser.bio
+          };
+          setCurrentUser(updatedUser);
+          localStorage.setItem('just_user', JSON.stringify(updatedUser));
+        }
+        if (data.sticker_packs && Array.isArray(data.sticker_packs) && data.sticker_packs.length > 0) {
+          localStorage.setItem('just_sticker_packs', JSON.stringify(data.sticker_packs));
+          window.dispatchEvent(new Event('just_sticker_packs_updated'));
+        }
+      }
+    } catch (e) {}
+
+    AudioHelper.playPop(580, 0.04);
+  };
+
   // Delete entire chat and its messages
   const handleDeleteChat = (chatId: string) => {
     if (chatId === 'chat-saved') {
@@ -1579,6 +1613,7 @@ export function App() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onOpenCreateChat={() => setIsCreateChatOpen(true)}
+          onRefresh={handlePullRefresh}
         />
       </div>
 

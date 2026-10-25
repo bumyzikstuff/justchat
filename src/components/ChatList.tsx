@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Chat, Message } from '../types';
-import { Pin, Search, Check, CheckCheck, Mic, Video, Music, Smile, Plus, Edit, Trash2, Bookmark } from 'lucide-react';
+import { Pin, Search, Check, CheckCheck, Mic, Video, Music, Smile, Plus, Edit, Trash2, Bookmark, RefreshCw } from 'lucide-react';
 import { AudioHelper } from '../utils/audio';
 
 interface ChatListProps {
@@ -13,6 +13,7 @@ interface ChatListProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onOpenCreateChat: () => void;
+  onRefresh?: () => void | Promise<void>;
 }
 
 export const ChatList: React.FC<ChatListProps> = ({
@@ -24,21 +25,27 @@ export const ChatList: React.FC<ChatListProps> = ({
   onDeleteChat,
   searchQuery,
   onSearchChange,
-  onOpenCreateChat
+  onOpenCreateChat,
+  onRefresh
 }) => {
   const [filter, setFilter] = useState<'all' | 'pinned' | 'groups'>('all');
   const TABS: ('all' | 'pinned' | 'groups')[] = ['all', 'pinned', 'groups'];
 
-  // Gesture swipe navigation between tabs
+  // Gesture swipe navigation between tabs + Pull-to-refresh
+  const listContainerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const isHorizontalSwipe = useRef(false);
+  const isPullingDown = useRef(false);
   const [swipeOffsetX, setSwipeOffsetX] = useState(0);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
     isHorizontalSwipe.current = false;
+    isPullingDown.current = false;
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -47,29 +54,62 @@ export const ChatList: React.FC<ChatListProps> = ({
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
 
-    if (absX > 15 && absX > absY * 1.3) {
+    // 1. Horizontal swipe across tabs
+    if (!isPullingDown.current && absX > 15 && absX > absY * 1.3) {
       isHorizontalSwipe.current = true;
       setSwipeOffsetX(dx * 0.35);
+      return;
+    }
+
+    // 2. Pull down to refresh when at top of list
+    const isAtTop = (listContainerRef.current?.scrollTop || 0) <= 0;
+    if (isAtTop && dy > 10 && absY > absX * 1.2 && !isHorizontalSwipe.current) {
+      isPullingDown.current = true;
+      setPullDistance(Math.min(dy * 0.45, 80));
     }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
+    // Handle tab swipe
     if (isHorizontalSwipe.current) {
       const dx = e.changedTouches[0].clientX - touchStartX.current;
       const currentIndex = TABS.indexOf(filter);
 
       if (dx < -45 && currentIndex < TABS.length - 1) {
-        // Swipe left -> next tab
         setFilter(TABS[currentIndex + 1]);
         AudioHelper.playPop(520, 0.03);
       } else if (dx > 45 && currentIndex > 0) {
-        // Swipe right -> prev tab
         setFilter(TABS[currentIndex - 1]);
         AudioHelper.playPop(520, 0.03);
       }
     }
+
+    // Handle pull to refresh
+    if (isPullingDown.current) {
+      if (pullDistance >= 50 && !isRefreshing) {
+        setIsRefreshing(true);
+        AudioHelper.playPop(500, 0.04);
+        if (onRefresh) {
+          Promise.resolve(onRefresh()).finally(() => {
+            setTimeout(() => {
+              setIsRefreshing(false);
+              setPullDistance(0);
+            }, 600);
+          });
+        } else {
+          setTimeout(() => {
+            setIsRefreshing(false);
+            setPullDistance(0);
+          }, 700);
+        }
+      } else {
+        setPullDistance(0);
+      }
+    }
+
     setSwipeOffsetX(0);
     isHorizontalSwipe.current = false;
+    isPullingDown.current = false;
   };
 
   // Sort chats: pinned first, then by last message time / order
@@ -167,8 +207,26 @@ export const ChatList: React.FC<ChatListProps> = ({
         </button>
       </div>
 
+      {/* Pull-to-refresh Indicator */}
+      {(pullDistance > 0 || isRefreshing) && (
+        <div 
+          className="flex items-center justify-center overflow-hidden transition-all duration-200 bg-[#17212b]/40 border-b border-[#242f3d]/30"
+          style={{ height: isRefreshing ? 48 : pullDistance }}
+        >
+          <div 
+            className="w-8 h-8 rounded-full bg-[#17212b] border border-[#2AABEE]/60 shadow-lg flex items-center justify-center text-[#2AABEE] transition-transform"
+            style={{
+              transform: isRefreshing ? undefined : `rotate(${pullDistance * 5}deg) scale(${Math.min(pullDistance / 40, 1)})`,
+            }}
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#2AABEE]' : 'text-sky-400'}`} />
+          </div>
+        </div>
+      )}
+
       {/* Chat list items with gesture swipe support */}
       <div 
+        ref={listContainerRef}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}

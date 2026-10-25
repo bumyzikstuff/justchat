@@ -42,14 +42,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [hasVideoError, setHasVideoError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Fallback to local sample video if external source fails
-  const videoSrc = hasVideoError ? '/sample-circle.mp4' : (message.mediaUrl || '/sample-circle.mp4');
+  const rawVideoUrl = message.mediaUrl || '';
+  const isDeadBlobVideo = rawVideoUrl.startsWith('blob:');
+  const videoSrc = (hasVideoError || !rawVideoUrl || isDeadBlobVideo) ? '/sample-circle.mp4' : rawVideoUrl;
 
   // Audio voice state
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
+  const [hasVoiceError, setHasVoiceError] = useState(false);
   const [voiceProgress, setVoiceProgress] = useState(0);
   const [playSpeed, setPlaySpeed] = useState<1 | 1.5 | 2>(1);
   const audioVoiceRef = useRef<HTMLAudioElement>(null);
+
+  const rawVoiceUrl = message.mediaUrl || '';
+  const isDeadBlobVoice = rawVoiceUrl.startsWith('blob:');
+  const voiceSrc = (hasVoiceError || !rawVoiceUrl || isDeadBlobVoice)
+    ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'
+    : rawVoiceUrl;
 
   // Toggle video circle sound or open fullscreen
   const handleVideoClick = () => {
@@ -321,6 +329,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             autoPlay
             loop
             muted={isVideoMuted}
+            onError={() => setHasVideoError(true)}
             className="w-full h-full object-cover transform -scale-x-100"
           />
 
@@ -363,9 +372,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <div className="flex items-center space-x-3 min-w-[210px] sm:min-w-[240px]">
             <audio
               ref={audioVoiceRef}
-              src={message.mediaUrl}
+              src={voiceSrc}
               onTimeUpdate={handleVoiceTimeUpdate}
               onEnded={handleVoiceEnded}
+              onError={() => setHasVoiceError(true)}
             />
             {/* Play/Pause Button */}
             <button

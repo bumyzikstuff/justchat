@@ -1,12 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Check, Camera, RefreshCw } from 'lucide-react';
+import { X, Check, Camera, RefreshCw, Loader2 } from 'lucide-react';
 import { AudioHelper } from '../utils/audio';
+import { uploadMediaToSupabase, blobToDataUrl } from '../services/supabase';
 
 interface VideoNoteRecorderModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSendVideoNote: (blobUrl: string, duration: number) => void;
 }
+
+const getSupportedVideoMime = (): string => {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const candidates = [
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+    'video/mp4;codecs=avc1,mp4a',
+    'video/mp4'
+  ];
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return '';
+};
 
 export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
   isOpen,
@@ -15,6 +30,7 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
 }) => {
   const [seconds, setSeconds] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [cameraError, setCameraError] = useState<string | null>(null);
 
@@ -29,6 +45,7 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
     let isMounted = true;
     setSeconds(0);
     setIsRecording(false);
+    setIsUploading(false);
     chunksRef.current = [];
 
     async function startCamera() {
@@ -49,8 +66,10 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
             videoRef.current.play();
           }
 
-          // Start recorder
-          const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+          // Start recorder with browser supported mime type
+          const mimeType = getSupportedVideoMime();
+          const options = mimeType ? { mimeType } : undefined;
+          const recorder = new MediaRecorder(stream, options);
           mediaRecorderRef.current = recorder;
 
           recorder.ondataavailable = (e) => {
@@ -101,11 +120,31 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
   const handleFinish = () => {
     AudioHelper.playRecordEnd();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        onSendVideoNote(url, seconds || 1);
-        onClose();
+      setIsUploading(true);
+      mediaRecorderRef.current.onstop = async () => {
+        try {
+          const mime = mediaRecorderRef.current?.mimeType || 'video/webm';
+          const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+          const blob = new Blob(chunksRef.current, { type: mime });
+
+          let finalUrl: string | null = null;
+          try {
+            finalUrl = await uploadMediaToSupabase(blob, `circle_${Date.now()}.${ext}`, mime);
+          } catch (e) {
+            console.warn('Video note upload failed:', e);
+          }
+
+          if (!finalUrl) {
+            finalUrl = await blobToDataUrl(blob);
+          }
+
+          if (finalUrl) {
+            onSendVideoNote(finalUrl, seconds || 1);
+          }
+        } finally {
+          setIsUploading(false);
+          onClose();
+        }
       };
       mediaRecorderRef.current.stop();
     } else {
@@ -206,15 +245,20 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
 
           <button
             onClick={handleFinish}
-            className="p-4 rounded-full bg-[#2AABEE] text-white hover:bg-sky-400 transition shadow-lg shadow-sky-500/30 active:scale-95 flex items-center justify-center"
+            disabled={isUploading}
+            className="p-4 rounded-full bg-[#2AABEE] text-white hover:bg-sky-400 transition shadow-lg shadow-sky-500/30 active:scale-95 flex items-center justify-center disabled:opacity-75"
             title="Отправить кружочек"
           >
-            <Check className="w-7 h-7 stroke-[3]" />
+            {isUploading ? (
+              <Loader2 className="w-7 h-7 animate-spin" />
+            ) : (
+              <Check className="w-7 h-7 stroke-[3]" />
+            )}
           </button>
         </div>
 
         <p className="text-gray-400 text-xs mt-4">
-          Кружочек (до 60 секунд) • Нажмите галочку для отправки
+          {isUploading ? 'Отправка кружочка в облако...' : 'Кружочек (до 60 секунд) • Нажмите галочку для отправки'}
         </p>
       </div>
     </div>

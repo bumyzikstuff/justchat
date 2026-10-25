@@ -263,18 +263,13 @@ export function App() {
     try {
       localStorage.setItem('just_messages', JSON.stringify(messages));
     } catch (e) {
-      console.warn('LocalStorage quota exceeded for messages, pruning large payloads to survive:', e);
+      console.warn('LocalStorage quota exceeded for messages, retaining recent messages:', e);
       try {
-        const sanitized: Record<string, Message[]> = {};
+        const trimmed: Record<string, Message[]> = {};
         for (const [cId, msgList] of Object.entries(messages)) {
-          sanitized[cId] = msgList.map((m) => {
-            if (m.mediaUrl && m.mediaUrl.length > 500000) {
-              return { ...m, mediaUrl: '' };
-            }
-            return m;
-          });
+          trimmed[cId] = msgList.slice(-50);
         }
-        localStorage.setItem('just_messages', JSON.stringify(sanitized));
+        localStorage.setItem('just_messages', JSON.stringify(trimmed));
       } catch (inner) {}
     }
   }, [messages]);

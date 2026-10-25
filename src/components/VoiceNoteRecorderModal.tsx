@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, X, Check, Trash2 } from 'lucide-react';
+import { Mic, X, Check, Trash2, Loader2 } from 'lucide-react';
 import { AudioHelper } from '../utils/audio';
+import { uploadMediaToSupabase, blobToDataUrl } from '../services/supabase';
 
 interface VoiceNoteRecorderModalProps {
   isOpen: boolean;
@@ -8,12 +9,28 @@ interface VoiceNoteRecorderModalProps {
   onSendVoiceNote: (audioUrl: string, duration: number, waveform: number[]) => void;
 }
 
+const getSupportedAudioMime = (): string => {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/aac',
+    'audio/ogg'
+  ];
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return '';
+};
+
 export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
   isOpen,
   onClose,
   onSendVoiceNote
 }) => {
   const [seconds, setSeconds] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const [waveform, setWaveform] = useState<number[]>([30, 50, 80, 40, 90, 60, 30, 70, 45, 85, 30, 95]);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -24,6 +41,7 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
     if (!isOpen) return;
 
     setSeconds(0);
+    setIsUploading(false);
     chunksRef.current = [];
     AudioHelper.playRecordStart();
 
@@ -33,14 +51,16 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           mediaStreamRef.current = stream;
 
-          const recorder = new MediaRecorder(stream);
+          const mimeType = getSupportedAudioMime();
+          const options = mimeType ? { mimeType } : undefined;
+          const recorder = new MediaRecorder(stream, options);
           mediaRecorderRef.current = recorder;
 
           recorder.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
           };
 
-          recorder.start();
+          recorder.start(200);
         }
       } catch (e) {
         console.warn('Microphone access:', e);
@@ -68,11 +88,31 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
     const finalWaveform = Array.from({ length: 24 }, () => Math.floor(Math.random() * 80) + 20);
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const url = URL.createObjectURL(blob);
-        onSendVoiceNote(url, seconds || 1, finalWaveform);
-        onClose();
+      setIsUploading(true);
+      mediaRecorderRef.current.onstop = async () => {
+        try {
+          const mime = mediaRecorderRef.current?.mimeType || 'audio/webm';
+          const ext = mime.includes('mp4') ? 'mp4' : mime.includes('aac') ? 'aac' : 'webm';
+          const blob = new Blob(chunksRef.current, { type: mime });
+
+          let finalUrl: string | null = null;
+          try {
+            finalUrl = await uploadMediaToSupabase(blob, `voice_${Date.now()}.${ext}`, mime);
+          } catch (e) {
+            console.warn('Upload voice note error:', e);
+          }
+
+          if (!finalUrl) {
+            finalUrl = await blobToDataUrl(blob);
+          }
+
+          if (finalUrl) {
+            onSendVoiceNote(finalUrl, seconds || 1, finalWaveform);
+          }
+        } finally {
+          setIsUploading(false);
+          onClose();
+        }
       };
       mediaRecorderRef.current.stop();
     } else {
@@ -101,7 +141,9 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
         <div className="font-mono text-2xl font-bold text-white mb-2">
           0:{seconds < 10 ? `0${seconds}` : seconds}
         </div>
-        <p className="text-xs text-gray-400 mb-6">Запись голосового сообщения...</p>
+        <p className="text-xs text-gray-400 mb-6">
+          {isUploading ? 'Отправка в облако...' : 'Запись голосового сообщения...'}
+        </p>
 
         {/* Animated Waveform Bars */}
         <div className="flex items-center justify-center space-x-1 h-12 w-full px-4 mb-8 bg-[#0e1621] rounded-2xl py-2">
@@ -118,7 +160,8 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
         <div className="flex items-center space-x-6 w-full justify-center">
           <button
             onClick={onClose}
-            className="flex-1 py-3 px-4 rounded-xl bg-gray-800 text-gray-300 hover:bg-gray-700 transition flex items-center justify-center space-x-2 text-xs font-semibold"
+            disabled={isUploading}
+            className="flex-1 py-3 px-4 rounded-xl bg-gray-800 text-gray-300 hover:bg-gray-700 transition flex items-center justify-center space-x-2 text-xs font-semibold disabled:opacity-50"
           >
             <Trash2 className="w-4 h-4 text-rose-400" />
             <span>Отмена</span>
@@ -126,10 +169,20 @@ export const VoiceNoteRecorderModal: React.FC<VoiceNoteRecorderModalProps> = ({
 
           <button
             onClick={handleFinish}
-            className="flex-1 py-3 px-4 rounded-xl bg-[#2AABEE] text-white hover:bg-sky-400 transition flex items-center justify-center space-x-2 text-xs font-semibold shadow-lg shadow-sky-500/20"
+            disabled={isUploading}
+            className="flex-1 py-3 px-4 rounded-xl bg-[#2AABEE] text-white hover:bg-sky-400 transition flex items-center justify-center space-x-2 text-xs font-semibold shadow-lg shadow-sky-500/20 disabled:opacity-75"
           >
-            <Check className="w-4 h-4 stroke-[3]" />
-            <span>Отправить</span>
+            {isUploading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Отправка...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>Отправить</span>
+              </>
+            )}
           </button>
         </div>
       </div>

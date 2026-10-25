@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { X, Volume2, VolumeX, Play, Pause, Download } from 'lucide-react';
 
 interface VideoNoteViewerModalProps {
@@ -22,7 +22,30 @@ export const VideoNoteViewerModal: React.FC<VideoNoteViewerModalProps> = ({
 }) => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
+  const [hasError, setHasError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const safeVideoUrl = (hasError || !videoUrl || videoUrl.startsWith('blob:'))
+    ? '/sample-circle.mp4'
+    : videoUrl;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setHasError(false);
+    setIsPlaying(true);
+
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.muted = isMuted;
+      videoRef.current.play().catch(() => {
+        if (videoRef.current) {
+          videoRef.current.muted = true;
+          setIsMuted(true);
+          videoRef.current.play().catch(() => {});
+        }
+      });
+    }
+  }, [isOpen, videoUrl]);
 
   if (!isOpen || !videoUrl) return null;
 
@@ -32,7 +55,7 @@ export const VideoNoteViewerModal: React.FC<VideoNoteViewerModalProps> = ({
       videoRef.current.pause();
       setIsPlaying(false);
     } else {
-      videoRef.current.play();
+      videoRef.current.play().catch(() => {});
       setIsPlaying(true);
     }
   };
@@ -81,11 +104,12 @@ export const VideoNoteViewerModal: React.FC<VideoNoteViewerModalProps> = ({
         >
           <video
             ref={videoRef}
-            src={videoUrl}
+            src={safeVideoUrl}
             autoPlay
             loop
             playsInline
             muted={isMuted}
+            onError={() => setHasError(true)}
             className="w-full h-full object-cover transform -scale-x-100"
           />
 

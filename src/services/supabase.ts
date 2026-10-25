@@ -532,6 +532,7 @@ export const updateStoryLikesInCloud = async (storyId: string, likes: any[]) => 
 export const uploadMediaToSupabase = async (
   file: File | Blob,
   fileName: string,
+  contentType?: string,
   bucket = 'justchat-media'
 ): Promise<string | null> => {
   const client = getSupabaseClient();
@@ -539,7 +540,9 @@ export const uploadMediaToSupabase = async (
 
   try {
     const filePath = `uploads/${Date.now()}_${fileName}`;
+    const mime = contentType || file.type || 'application/octet-stream';
     const { error } = await client.storage.from(bucket).upload(filePath, file, {
+      contentType: mime,
       cacheControl: '3600',
       upsert: true
     });
@@ -555,4 +558,14 @@ export const uploadMediaToSupabase = async (
     console.warn('Storage error:', e);
     return null;
   }
+};
+
+// Helper: Convert Blob to persistent Data URL (fallback when offline)
+export const blobToDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(blob);
+  });
 };

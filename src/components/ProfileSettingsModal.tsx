@@ -3,6 +3,7 @@ import { User } from '../types';
 import { AVAILABLE_EMOJIS } from '../data/mockData';
 import { X, Sparkles, Check, Copy, Shield, LogOut, KeyRound, Link as LinkIcon, Camera, Upload, Bell, Volume2, VolumeX, Smartphone, CheckCircle2, Cloud, Database, EyeOff, QrCode } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import QRCode from 'qrcode';
 import { AudioHelper } from '../utils/audio';
 import { getSupabaseConfig, resetSupabaseClient } from '../services/supabase';
 
@@ -47,6 +48,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedDeviceLink, setCopiedDeviceLink] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
   const getDeviceLoginUrl = () => {
     try {
@@ -56,6 +58,22 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       return window.location.origin;
     }
   };
+
+  useEffect(() => {
+    if (isOpen) {
+      const url = getDeviceLoginUrl();
+      QRCode.toDataURL(url, {
+        width: 240,
+        margin: 1,
+        color: {
+          dark: '#0e1621',
+          light: '#ffffff'
+        }
+      })
+        .then((dataUri) => setQrDataUrl(dataUri))
+        .catch((err) => console.error('QR code error', err));
+    }
+  }, [isOpen, currentUser]);
 
   const handleCopyDeviceLink = () => {
     navigator.clipboard.writeText(getDeviceLoginUrl());
@@ -438,11 +456,17 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           </p>
 
           <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-[#17212b] p-3 rounded-xl border border-[#242f3d]">
-            <img 
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(getDeviceLoginUrl())}`} 
-              alt="QR Code" 
-              className="w-28 h-28 rounded-xl bg-white p-1.5 shadow"
-            />
+            {qrDataUrl ? (
+              <img 
+                src={qrDataUrl} 
+                alt="QR Code" 
+                className="w-28 h-28 rounded-xl bg-white p-1.5 shadow object-contain"
+              />
+            ) : (
+              <div className="w-28 h-28 rounded-xl bg-[#0e1621] border border-[#242f3d] flex items-center justify-center text-xs text-gray-400">
+                <span className="animate-pulse">Генерация...</span>
+              </div>
+            )}
             <div className="flex-1 space-y-2 text-center sm:text-left w-full">
               <p className="text-[11px] text-gray-400">
                 1. Наведи камеру телефона на этот QR-код<br/>

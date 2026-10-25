@@ -38,11 +38,80 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const hasFinishedRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handleFinish = () => {
+    if (hasFinishedRef.current) return;
+    hasFinishedRef.current = true;
+    setIsRecording(false);
+    clearTimer();
+    AudioHelper.playRecordEnd();
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.onstop = () => {
+        try {
+          const mime = recorder.mimeType || 'video/webm';
+          const blob = new Blob(chunksRef.current, { type: mime });
+          const localUrl = URL.createObjectURL(blob);
+          onSendVideoNote(blob, localUrl, seconds || 1);
+        } catch (e) {
+          console.warn('Process video note error:', e);
+        }
+        cleanupStream();
+        onClose();
+      };
+      try {
+        recorder.stop();
+      } catch (e) {
+        onClose();
+      }
+    } else {
+      // Fallback sample circular video note
+      const fallbackUrl = 'https://assets.mixkit.co/videos/preview/mixkit-young-man-exercising-in-a-gym-42616-large.mp4';
+      const mockBlob = new Blob([], { type: 'video/mp4' });
+      onSendVideoNote(mockBlob, fallbackUrl, seconds || 3);
+      cleanupStream();
+      onClose();
+    }
+  };
+
+  const cleanupStream = () => {
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch (e) {}
+      mediaStreamRef.current = null;
+    }
+  };
+
+  const handleCancel = () => {
+    hasFinishedRef.current = true;
+    setIsRecording(false);
+    clearTimer();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.onstop = null;
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+    cleanupStream();
+    onClose();
+  };
 
   useEffect(() => {
     if (!isOpen) return;
 
     let isMounted = true;
+    hasFinishedRef.current = false;
     setSeconds(0);
     setIsRecording(false);
     setIsUploading(false);
@@ -57,20 +126,20 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
             audio: true
           });
           if (!isMounted) {
-            stream.getTracks().forEach(t => t.stop());
+            stream.getTracks().forEach((t) => t.stop());
             return;
           }
           mediaStreamRef.current = stream;
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
-            videoRef.current.play();
+            videoRef.current.play().catch(() => {});
           }
 
           // Start recorder with optimized bitrates for fast sending & high quality
           const mimeType = getSupportedVideoMime();
           const options: MediaRecorderOptions = {
             ...(mimeType ? { mimeType } : {}),
-            videoBitsPerSecond: 600000, // 600 kbps: sharp circle video, lightweight file
+            videoBitsPerSecond: 600000,
             audioBitsPerSecond: 64000
           };
           const recorder = new MediaRecorder(stream, options);
@@ -83,16 +152,22 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
           };
 
           recorder.start(150);
-          setIsRecording(true);
-          AudioHelper.playRecordStart();
+          if (isMounted) {
+            setIsRecording(true);
+            AudioHelper.playRecordStart();
+          }
         } else {
-          setCameraError('Камера недоступна в этом браузере');
-          setIsRecording(true);
+          if (isMounted) {
+            setCameraError('Камера недоступна в этом браузере');
+            setIsRecording(true);
+          }
         }
       } catch (err: unknown) {
         console.warn('Camera access issue:', err);
-        setCameraError('Разрешите доступ к камере или используется демо-режим');
-        setIsRecording(true); // run simulated timer
+        if (isMounted) {
+          setCameraError('Разрешите доступ к камере или используется демо-режим');
+          setIsRecording(true);
+        }
       }
     }
 
@@ -100,57 +175,31 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
 
     return () => {
       isMounted = false;
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach(t => t.stop());
-      }
+      clearTimer();
+      cleanupStream();
     };
   }, [isOpen, facingMode]);
 
-  // Timer tick
+  // Timer tick (pure state increment, capped at 60s)
   useEffect(() => {
-    if (!isRecording) return;
-    const interval = setInterval(() => {
-      setSeconds(prev => {
-        if (prev >= 60) {
-          handleFinish();
+    if (!isOpen || !isRecording) {
+      clearTimer();
+      return;
+    }
+
+    timerRef.current = setInterval(() => {
+      setSeconds((prev) => {
+        if (prev >= 59) {
+          clearTimer();
+          setTimeout(() => handleFinish(), 0);
           return 60;
         }
         return prev + 1;
       });
     }, 1000);
-    return () => clearInterval(interval);
-  }, [isRecording]);
 
-  const handleFinish = () => {
-    AudioHelper.playRecordEnd();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.onstop = () => {
-        try {
-          const mime = mediaRecorderRef.current?.mimeType || 'video/webm';
-          const blob = new Blob(chunksRef.current, { type: mime });
-          const localUrl = URL.createObjectURL(blob);
-          onSendVideoNote(blob, localUrl, seconds || 1);
-        } catch (e) {
-          console.warn('Process video note error:', e);
-        }
-        onClose();
-      };
-      mediaRecorderRef.current.stop();
-    } else {
-      // Fallback sample circular video note
-      const fallbackUrl = 'https://assets.mixkit.co/videos/preview/mixkit-young-man-exercising-in-a-gym-42616-large.mp4';
-      const mockBlob = new Blob([], { type: 'video/mp4' });
-      onSendVideoNote(mockBlob, fallbackUrl, seconds || 3);
-      onClose();
-    }
-  };
-
-  const handleCancel = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-    onClose();
-  };
+    return () => clearTimer();
+  }, [isOpen, isRecording]);
 
   if (!isOpen) return null;
 

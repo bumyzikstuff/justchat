@@ -2561,18 +2561,22 @@ export function App() {
       />
 
       {/* Circular Video Note Recorder Modal (КРУЖОЧКИ) */}
-      <VideoNoteRecorderModal
-        isOpen={isVideoModalOpen}
-        onClose={() => setIsVideoModalOpen(false)}
-        onSendVideoNote={handleSendVideoNote}
-      />
+      {isVideoModalOpen && (
+        <VideoNoteRecorderModal
+          isOpen={isVideoModalOpen}
+          onClose={() => setIsVideoModalOpen(false)}
+          onSendVideoNote={handleSendVideoNote}
+        />
+      )}
 
       {/* Voice Note Recorder Modal (ГОЛОСОВЫЕ) */}
-      <VoiceNoteRecorderModal
-        isOpen={isVoiceModalOpen}
-        onClose={() => setIsVoiceModalOpen(false)}
-        onSendVoiceNote={handleSendVoiceNote}
-      />
+      {isVoiceModalOpen && (
+        <VoiceNoteRecorderModal
+          isOpen={isVoiceModalOpen}
+          onClose={() => setIsVoiceModalOpen(false)}
+          onSendVoiceNote={handleSendVoiceNote}
+        />
+      )}
 
       {/* Profile & Emoji Status Settings Modal */}
       <ProfileSettingsModal

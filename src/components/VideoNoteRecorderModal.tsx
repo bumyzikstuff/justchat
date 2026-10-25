@@ -61,8 +61,12 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
         try {
           const mime = recorder.mimeType || 'video/webm';
           const blob = new Blob(chunksRef.current, { type: mime });
-          const localUrl = URL.createObjectURL(blob);
-          onSendVideoNote(blob, localUrl, seconds || 1);
+          if (blob.size > 0) {
+            const localUrl = URL.createObjectURL(blob);
+            onSendVideoNote(blob, localUrl, seconds || 1);
+          } else {
+            console.warn('Recorded video note was empty (0 bytes)');
+          }
         } catch (e) {
           console.warn('Process video note error:', e);
         }
@@ -70,15 +74,15 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
         onClose();
       };
       try {
+        if (recorder.state === 'recording') {
+          recorder.requestData();
+        }
         recorder.stop();
       } catch (e) {
+        cleanupStream();
         onClose();
       }
     } else {
-      // Fallback sample circular video note
-      const fallbackUrl = 'https://assets.mixkit.co/videos/preview/mixkit-young-man-exercising-in-a-gym-42616-large.mp4';
-      const mockBlob = new Blob([], { type: 'video/mp4' });
-      onSendVideoNote(mockBlob, fallbackUrl, seconds || 3);
       cleanupStream();
       onClose();
     }
@@ -120,29 +124,58 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
     async function startCamera() {
       try {
         setCameraError(null);
+        cleanupStream();
+
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode, width: { ideal: 480 }, height: { ideal: 480 } },
-            audio: true
-          });
-          if (!isMounted) {
-            stream.getTracks().forEach((t) => t.stop());
+          let stream: MediaStream | null = null;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: { ideal: facingMode },
+                width: { ideal: 480 },
+                height: { ideal: 480 }
+              },
+              audio: true
+            });
+          } catch (camErr) {
+            console.warn('Ideal facingMode constraint failed, falling back:', camErr);
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            } catch (micErr) {
+              console.warn('Video + Audio failed, trying video only:', micErr);
+              stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            }
+          }
+
+          if (!isMounted || !stream) {
+            if (stream) stream.getTracks().forEach((t) => t.stop());
             return;
           }
+
           mediaStreamRef.current = stream;
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             videoRef.current.play().catch(() => {});
           }
 
-          // Start recorder with optimized bitrates for fast sending & high quality
+          // Start recorder with resilient browser fallbacks
           const mimeType = getSupportedVideoMime();
-          const options: MediaRecorderOptions = {
-            ...(mimeType ? { mimeType } : {}),
-            videoBitsPerSecond: 600000,
-            audioBitsPerSecond: 64000
-          };
-          const recorder = new MediaRecorder(stream, options);
+          let recorder: MediaRecorder;
+          try {
+            const options: MediaRecorderOptions = {
+              ...(mimeType ? { mimeType } : {}),
+              videoBitsPerSecond: 600000,
+              audioBitsPerSecond: 64000
+            };
+            recorder = new MediaRecorder(stream, options);
+          } catch (recErr1) {
+            try {
+              recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            } catch (recErr2) {
+              recorder = new MediaRecorder(stream);
+            }
+          }
+
           mediaRecorderRef.current = recorder;
 
           recorder.ondataavailable = (e) => {
@@ -159,14 +192,12 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
         } else {
           if (isMounted) {
             setCameraError('Камера недоступна в этом браузере');
-            setIsRecording(true);
           }
         }
       } catch (err: unknown) {
         console.warn('Camera access issue:', err);
         if (isMounted) {
-          setCameraError('Разрешите доступ к камере или используется демо-режим');
-          setIsRecording(true);
+          setCameraError('Разрешите доступ к камере в браузере');
         }
       }
     }
@@ -244,15 +275,14 @@ export const VideoNoteRecorderModal: React.FC<VideoNoteRecorderModalProps> = ({
               muted
               playsInline
               autoPlay
-              className="w-full h-full object-cover transform -scale-x-100"
+              className={`w-full h-full object-cover ${facingMode === 'user' ? 'transform -scale-x-100' : ''}`}
             />
 
-            {/* Error or Demo overlay message */}
+            {/* Error overlay message */}
             {cameraError && (
               <div className="absolute inset-0 bg-zinc-900/90 p-4 flex flex-col items-center justify-center text-center text-xs text-amber-300">
                 <Camera className="w-8 h-8 mb-2 text-[#2AABEE]" />
                 <p>{cameraError}</p>
-                <p className="text-[10px] text-gray-400 mt-1">Запишется тестовый кружочек</p>
               </div>
             )}
 

@@ -25,9 +25,7 @@ export const VideoNoteViewerModal: React.FC<VideoNoteViewerModalProps> = ({
   const [hasError, setHasError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const safeVideoUrl = (hasError || !videoUrl || videoUrl.startsWith('blob:'))
-    ? '/sample-circle.mp4'
-    : videoUrl;
+  const safeVideoUrl = videoUrl || '';
 
   useEffect(() => {
     if (!isOpen) return;

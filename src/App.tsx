@@ -1334,19 +1334,24 @@ export function App() {
       try {
         const mime = blob.type || 'video/webm';
         const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-        let cloudUrl = await uploadMediaToSupabase(blob, `circle_${Date.now()}.${ext}`, mime);
-        if (!cloudUrl) {
-          cloudUrl = await blobToDataUrl(blob);
+        let cloudUrl: string | null = null;
+        if (blob && blob.size > 0) {
+          cloudUrl = await uploadMediaToSupabase(blob, `circle_${Date.now()}.${ext}`, mime);
+          if (!cloudUrl) {
+            cloudUrl = await blobToDataUrl(blob);
+          }
         }
         const persistentMsg = { ...newMsg, mediaUrl: cloudUrl || localUrl };
         persistAndBroadcastMessage(persistentMsg);
 
-        setMessages((prev) => ({
-          ...prev,
-          [selectedChatId]: (prev[selectedChatId] || []).map((m) =>
-            m.id === msgId ? { ...m, mediaUrl: persistentMsg.mediaUrl } : m
-          )
-        }));
+        if (cloudUrl && cloudUrl !== localUrl) {
+          setMessages((prev) => ({
+            ...prev,
+            [selectedChatId]: (prev[selectedChatId] || []).map((m) =>
+              m.id === msgId ? { ...m, mediaUrl: cloudUrl! } : m
+            )
+          }));
+        }
       } catch (err) {
         console.warn('Background upload video note error:', err);
       }

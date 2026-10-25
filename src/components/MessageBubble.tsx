@@ -43,8 +43,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const rawVideoUrl = message.mediaUrl || '';
-  const isDeadBlobVideo = rawVideoUrl.startsWith('blob:');
-  const videoSrc = (hasVideoError || !rawVideoUrl || isDeadBlobVideo) ? '/sample-circle.mp4' : rawVideoUrl;
+  const videoSrc = (hasVideoError || !rawVideoUrl) ? '' : rawVideoUrl;
 
   // Audio voice state
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
@@ -54,10 +53,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const audioVoiceRef = useRef<HTMLAudioElement>(null);
 
   const rawVoiceUrl = message.mediaUrl || '';
-  const isDeadBlobVoice = rawVoiceUrl.startsWith('blob:');
-  const voiceSrc = (hasVoiceError || !rawVoiceUrl || isDeadBlobVoice)
-    ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'
-    : rawVoiceUrl;
+  const voiceSrc = (hasVoiceError || !rawVoiceUrl) ? '' : rawVoiceUrl;
 
   // Toggle video circle sound or open fullscreen
   const handleVideoClick = () => {
@@ -330,7 +326,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             loop
             muted={isVideoMuted}
             onError={() => setHasVideoError(true)}
-            className="w-full h-full object-cover transform -scale-x-100"
+            className="w-full h-full object-cover"
           />
 
           {/* Sound / Expand Indicator */}
